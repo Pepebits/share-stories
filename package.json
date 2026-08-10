@@ -1,0 +1,48 @@
+{
+  "name": "share-historys",
+  "version": "1.0.0",
+  "description": "Cross-platform story automation — bridge Telegram and Instagram stories in both directions",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "keywords": [
+    "telegram",
+    "instagram",
+    "stories",
+    "automation",
+    "cross-posting"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "instagram-private-api": "^1.46.1",
+    "node-telegram-bot-api": "^1.1.0",
+    "telegram": "^2.26.22",
+    "tslib": "^2.8.1",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.16.0",
+    "jest": "^30.0.0",
+    "prettier": "^3.4.2",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.0"
+  }
+}
