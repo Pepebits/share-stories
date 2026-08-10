@@ -1,0 +1,30 @@
+[Unit]
+Description=Share Historys — Telegram ↔ Instagram Story Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=share-historys
+WorkingDirectory=/opt/share-historys
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=share-historys
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/share-historys/data
+ReadOnlyPaths=/opt/share-historys/.env
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/share-historys/.env
+
+[Install]
+WantedBy=multi-user.target
