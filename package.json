@@ -29,14 +29,15 @@
       "better-sqlite3",
       "esbuild",
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "ip-address@<10.2.1": ">=10.2.1"
+    }
   },
   "dependencies": {
     "axios": "^1.7.9",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
-    "instagram-private-api": "^1.46.1",
-    "node-telegram-bot-api": "^1.1.0",
     "telegram": "^2.26.22",
     "tslib": "^2.8.1",
     "winston": "^3.17.0"

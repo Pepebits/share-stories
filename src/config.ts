@@ -26,9 +26,14 @@ function parseIntEnv(key: string, fallback: number): number {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function parseListEnv(key: string): string[] {
+  const raw = optionalEnv(key);
+  return raw
+    ? raw.split(',').map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
 export interface TelegramConfig {
-  botToken: string;
-  businessConnectionId: string;
   apiId: number;
   apiHash: string;
   phoneNumber: string;
@@ -37,58 +42,80 @@ export interface TelegramConfig {
 }
 
 export interface InstagramConfig {
-  username: string;
-  password: string;
-  sessionPath: string;
-  monitoredUsers: string[];
-  graphAppId: string;
-  graphAppSecret: string;
-  graphAccountId: string;
-  graphAccessToken: string;
+  accountId: string;
+  accessToken: string;
+}
+
+export interface MediaServerSettings {
+  port: number;
+  host: string;
+  publicBaseUrl: string;
+  ttlSeconds: number;
 }
 
 export interface AppConfig {
   telegram: TelegramConfig;
   instagram: InstagramConfig;
+  mediaServer: MediaServerSettings;
   pollIntervalSeconds: number;
   databasePath: string;
   tempDir: string;
+  sessionFilePath: string;
   logLevel: string;
   projectRoot: string;
 }
 
+/**
+ * Meta fetches story media from PUBLIC_BASE_URL over the open internet. A
+ * loopback or private address means every publish will fail with an opaque
+ * container ERROR, so fail loudly here instead.
+ */
+function validatePublicBaseUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`PUBLIC_BASE_URL is not a valid URL: ${raw}`);
+  }
+
+  const unreachable = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1)/i;
+  if (unreachable.test(url.hostname) || unreachable.test(url.host)) {
+    throw new Error(
+      `PUBLIC_BASE_URL points at ${url.hostname}, which Instagram cannot reach. ` +
+        'It must be a public address or hostname, typically a reverse proxy in front of this process.'
+    );
+  }
+
+  return url.origin;
+}
+
 export function loadConfig(): AppConfig {
-  const monitoredPeersRaw = optionalEnv('TELEGRAM_MONITORED_PEERS');
-  const monitoredUsersRaw = optionalEnv('INSTAGRAM_MONITORED_USERS');
+  const publicBaseUrl = validatePublicBaseUrl(requireEnv('PUBLIC_BASE_URL'));
 
   return {
     projectRoot,
     telegram: {
-      botToken: requireEnv('TELEGRAM_BOT_TOKEN'),
-      businessConnectionId: optionalEnv('TELEGRAM_BUSINESS_CONNECTION_ID'),
       apiId: parseIntEnv('TELEGRAM_API_ID', 0),
-      apiHash: optionalEnv('TELEGRAM_API_HASH'),
-      phoneNumber: optionalEnv('TELEGRAM_PHONE_NUMBER'),
+      apiHash: requireEnv('TELEGRAM_API_HASH'),
+      phoneNumber: requireEnv('TELEGRAM_PHONE_NUMBER'),
       sessionString: optionalEnv('TELEGRAM_SESSION_STRING'),
-      monitoredPeers: monitoredPeersRaw
-        ? monitoredPeersRaw.split(',').map((p) => p.trim()).filter(Boolean)
-        : [],
+      monitoredPeers: parseListEnv('TELEGRAM_MONITORED_PEERS'),
     },
     instagram: {
-      username: requireEnv('INSTAGRAM_USERNAME'),
-      password: requireEnv('INSTAGRAM_PASSWORD'),
-      sessionPath: optionalEnv('INSTAGRAM_SESSION_PATH', './data/instagram_session.json'),
-      monitoredUsers: monitoredUsersRaw
-        ? monitoredUsersRaw.split(',').map((u) => u.trim()).filter(Boolean)
-        : [],
-      graphAppId: optionalEnv('INSTAGRAM_GRAPH_APP_ID'),
-      graphAppSecret: optionalEnv('INSTAGRAM_GRAPH_APP_SECRET'),
-      graphAccountId: optionalEnv('INSTAGRAM_GRAPH_ACCOUNT_ID'),
-      graphAccessToken: optionalEnv('INSTAGRAM_GRAPH_ACCESS_TOKEN'),
+      accountId: requireEnv('INSTAGRAM_ACCOUNT_ID'),
+      accessToken: requireEnv('INSTAGRAM_ACCESS_TOKEN'),
+    },
+    mediaServer: {
+      port: parseIntEnv('MEDIA_SERVER_PORT', 8080),
+      // Loopback by default: expose it through a TLS-terminating proxy.
+      host: optionalEnv('MEDIA_SERVER_HOST', '127.0.0.1'),
+      publicBaseUrl,
+      ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600),
     },
     pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120),
     databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
     tempDir: optionalEnv('TEMP_DIR', './data/temp'),
+    sessionFilePath: optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt'),
     logLevel: optionalEnv('LOG_LEVEL', 'info'),
   };
 }
