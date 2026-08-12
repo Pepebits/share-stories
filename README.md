@@ -76,6 +76,10 @@ pnpm run build
 pnpm start              # or: pnpm run dev
 ```
 
+On first run, leave `TELEGRAM_SESSION_STRING` empty. The session is written to
+`./data/telegram-session.txt` with mode `0600` — copy it into `.env` and delete the
+file. It is never logged: it grants full access to the Telegram account.
+
 ## Tests
 
 ```bash
@@ -92,10 +96,6 @@ handshake is exercised end to end: container creation, status polling,
 `db/state.ts`, and the startup path in `index.ts` are untested. Whether Meta
 accepts a given video's format, and whether it can reach `PUBLIC_BASE_URL`, can
 only be learned from a real publish.
-
-On first run, leave `TELEGRAM_SESSION_STRING` empty. The session is written to
-`./data/telegram-session.txt` with mode `0600` — copy it into `.env` and delete the
-file. It is never logged: it grants full access to the Telegram account.
 
 ## How It Works
 
