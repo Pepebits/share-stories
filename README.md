@@ -1,213 +1,115 @@
 # Share Historys
 
-Cross-platform story automation — bridge Telegram and Instagram stories in both directions.
-
-- **Telegram → Instagram**: New stories on Telegram channels/users are automatically reposted to Instagram
-- **Instagram → Telegram**: New stories on Instagram accounts are automatically reposted to Telegram
-
-## Architecture
+Reposts stories from monitored Telegram channels to Instagram, using Instagram's
+official Content Publishing API.
 
 ```
-┌──────────────────┐          ┌──────────────────┐
-│  Telegram Story  │   GramJS │  Instagram Story │
-│   (Source)       │──────────│   (Target)       │
-│                  │  Bridge  │                  │
-│  Monitored via   │  TG → IG │  Posted via      │
-│  GramJS MTProto  │          │  instagram-      │
-│                  │          │  private-api     │
-└──────────────────┘          └──────────────────┘
-
-┌──────────────────┐          ┌──────────────────┐
-│  Instagram Story │  insta-  │  Telegram Story  │
-│   (Source)       │──────────│   (Target)       │
-│                  │  Bridge  │                  │
-│  Read via        │  IG → TG │  Posted via      │
-│  UserStoryFeed   │          │  Bot API         │
-│                  │          │  postStory()      │
-└──────────────────┘          └──────────────────┘
+┌──────────────────┐                      ┌──────────────────┐
+│  Telegram Story  │                      │  Instagram Story │
+│    (source)      │─────── bridge ──────▶│    (target)      │
+│                  │                      │                  │
+│  read via GramJS │  ┌────────────────┐  │  published via   │
+│  MTProto         │  │  media server  │  │  Content         │
+│                  │  │  (public URL)  │  │  Publishing API  │
+└──────────────────┘  └────────────────┘  └──────────────────┘
+                              ▲
+                    Meta fetches the media itself
 ```
+
+## Why only one direction
+
+Instagram → Telegram is **not implemented, and cannot be implemented officially.**
+Meta provides no way to read another account's stories:
+
+- **Publishing**: `media_type=STORIES` works, but only to the authenticated account.
+- **Reading**: `GET /{ig-user-id}/stories` returns *your own* stories.
+  `business_discovery` exposes other business accounts' profile and posts, but not stories.
+- **Webhooks**: the only story field is `story_insights`, which fires **when the story
+  expires** (24h late), carries metrics only (no media URL), and is delivered solely for
+  accounts that have authorized the app via `/me/subscribed_apps`.
+
+The Instagram Basic Display API — the usual suggestion — was **shut down on
+4 December 2024**, and never supported stories in any case.
+
+Bridging that direction therefore requires an unofficial client
+(`instagram-private-api`, unmaintained since March 2024, or Python's `instagrapi`),
+which risks the account and violates Meta's terms. That was a deliberate trade-off,
+not an oversight. See git history for the removed implementation.
 
 ## Tech Stack
 
-- **Runtime**: Node.js 22+ (ESM)
-- **Language**: TypeScript 5.7
-- **Telegram Bot API**: `node-telegram-bot-api` v1.1.0
-- **Telegram MTProto (story reading)**: GramJS (`telegram` package)
-- **Instagram**: `instagram-private-api` v1.46 (primary) + Graph API (optional fallback)
-- **State Store**: SQLite via `better-sqlite3`
-- **Logging**: Winston
+- **Runtime**: Node.js 22+ (ESM) · **Language**: TypeScript 5.9 · **Package manager**: pnpm 10
+- **Telegram (reading)**: GramJS (`telegram`, MTProto)
+- **Instagram (publishing)**: Content Publishing API via `graph.instagram.com` v25.0
+- **State**: SQLite (`better-sqlite3`) · **Logging**: Winston
 
 ## Prerequisites
 
-### Telegram (Bot API — for posting stories)
+### Telegram
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Enable **Business Mode**: `/mybots` → Bot Settings → Business Mode → Enable
-3. You need a **Telegram Business account** with **Telegram Premium**
-4. Link the bot: Settings → Telegram Business → Chatbots → Add your bot
-5. When linked, your bot receives a `business_connection` update with the `business_connection_id`
-6. Grant the bot the **`can_manage_stories`** right
-
-### Telegram (GramJS — for reading stories, TG→IG bridge only)
-
-1. Go to [my.telegram.org](https://my.telegram.org/apps)
-2. Create an app to get `api_id` and `api_hash`
-3. You need a Telegram user account phone number
-4. On first run, GramJS will need an authentication code (sent to your Telegram)
+1. Create an app at [my.telegram.org](https://my.telegram.org/apps) → `api_id`, `api_hash`.
+2. A Telegram user account (stories cannot be enumerated through the Bot API).
+3. First run asks for the login code sent to that account.
 
 ### Instagram
 
-1. An Instagram account (username + password)
-2. For the official Graph API (optional):
-   - Facebook Developer account
-   - Facebook App with `instagram_content_publish` permission
-   - Instagram Business or Creator account linked to a Facebook Page
+1. An Instagram **Business or Creator** account.
+2. A Meta app with **Instagram API with Instagram Login** configured, plus the
+   `instagram_business_content_publish` permission.
+3. A long-lived access token and the numeric account id.
 
-### Server
+### Networking — required
 
-- A VPS or server running Linux with Node.js 22+
-- For production: systemd or Docker
+Meta downloads the media from a URL you serve; it does not accept uploads. You need a
+**publicly reachable HTTPS origin** pointing at this process, e.g. Caddy or nginx in
+front of `MEDIA_SERVER_PORT`. Without it, every publish fails with a container `ERROR`.
+
+Media is held in memory and served at a single-use 256-bit URL that is revoked as
+soon as Meta fetches it.
 
 ## Setup
 
-### 1. Clone and Install
-
 ```bash
-git clone <repo-url> share-historys
-cd share-historys
-npm install
+pnpm install
+cp .env.example .env    # fill in credentials
+pnpm run build
+pnpm start              # or: pnpm run dev
 ```
 
-### 2. Configure Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
-
-See `.env.example` for all required variables. At minimum:
-
-| Variable | Required For | Description |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Both bridges | Bot token from @BotFather |
-| `TELEGRAM_BUSINESS_CONNECTION_ID` | IG→TG bridge | From business_connection update |
-| `TELEGRAM_API_ID` | TG→IG bridge | From my.telegram.org |
-| `TELEGRAM_API_HASH` | TG→IG bridge | From my.telegram.org |
-| `TELEGRAM_PHONE_NUMBER` | TG→IG bridge | Your phone number |
-| `TELEGRAM_MONITORED_PEERS` | TG→IG bridge | Comma-separated usernames |
-| `INSTAGRAM_USERNAME` | Both bridges | Instagram login |
-| `INSTAGRAM_PASSWORD` | Both bridges | Instagram password |
-| `INSTAGRAM_MONITORED_USERS` | IG→TG bridge | Comma-separated usernames |
-
-### 3. Build
-
-```bash
-npm run build
-```
-
-### 4. Run (Development)
-
-```bash
-npm run dev
-```
-
-### 5. Run (Production)
-
-```bash
-npm start
-```
-
-## Deployment (VPS with systemd)
-
-### 1. Copy files to server
-
-```bash
-scp -r dist/ package.json node_modules/ user@vps:/opt/share-historys/
-scp .env user@vps:/opt/share-historys/
-```
-
-### 2. Create service user
-
-```bash
-sudo useradd -r -s /bin/false share-historys
-sudo chown -R share-historys:share-historys /opt/share-historys
-```
-
-### 3. Install systemd service
-
-```bash
-sudo cp share-historys.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable share-historys
-sudo systemctl start share-historys
-```
-
-### 4. Check status
-
-```bash
-sudo systemctl status share-historys
-sudo journalctl -u share-historys -f
-```
-
-## Docker (Alternative)
-
-```dockerfile
-FROM node:22-alpine
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --production
-COPY dist/ ./dist/
-COPY .env ./
-RUN mkdir -p /app/data
-USER node
-CMD ["node", "dist/index.js"]
-```
-
-```bash
-docker build -t share-historys .
-docker run -d --name share-historys \
-  -v $(pwd)/data:/app/data \
-  --env-file .env \
-  share-historys
-```
+On first run, leave `TELEGRAM_SESSION_STRING` empty. The session is written to
+`./data/telegram-session.txt` with mode `0600` — copy it into `.env` and delete the
+file. It is never logged: it grants full access to the Telegram account.
 
 ## How It Works
 
-### Telegram → Instagram Bridge
+1. GramJS polls `stories.GetAllStories` for the peers in `TELEGRAM_MONITORED_PEERS`.
+2. New stories are downloaded and checked against the SQLite store.
+3. The media is exposed at a temporary public URL.
+4. `POST /<IG_ID>/media` creates a `STORIES` container.
+5. The container's `status_code` is polled until `FINISHED`.
+6. `POST /<IG_ID>/media_publish` publishes it; the URL is revoked.
 
-1. GramJS connects to Telegram using your user account credentials
-2. Polls for active stories via `stories.GetAllStories` MTProto API
-3. Filters stories from your configured `TELEGRAM_MONITORED_PEERS`
-4. Downloads story media (photo/video)
-5. Checks SQLite state store to avoid duplicates
-6. Posts to Instagram via `instagram-private-api` (or Graph API if configured)
+Failures are recorded in the state store, and permanent ones (rejected token, bad
+media) are not retried.
 
-### Instagram → Telegram Bridge
+## Deployment
 
-1. Uses `instagram-private-api` to fetch stories from configured users
-2. Downloads story media at highest available resolution
-3. Checks SQLite state store to avoid duplicates
-4. Posts to Telegram via Bot API `postStory()` using your business connection
+```bash
+sudo cp share-historys.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now share-historys
+sudo journalctl -u share-historys -f
+```
 
-### State Store
+## Limitations
 
-- SQLite database tracking every processed story
-- Prevents duplicate posts across restarts
-- Records successes, failures, and error messages
-- Automatic cleanup of old entries (>30 days)
-
-## Limitations & Caveats
-
-### Instagram
-- **Unofficial API risk**: `instagram-private-api` uses Instagram's private API. Overuse may trigger action blocks or bans. Use responsibly.
-- **Graph API requires public URL**: The official Instagram Graph API requires media to be hosted at a publicly accessible URL — it cannot accept direct file uploads from a buffer.
-- **Rate limits**: Instagram rate-limits aggressively. The default 120s polling interval is safe for most use cases.
-- **2FA**: If your Instagram account has 2FA, you may need to handle the challenge on first login.
-
-### Telegram
-- **Business account required**: Posting stories via Bot API requires Telegram Business + Premium.
-- **Story reading requires MTProto**: The Bot API cannot enumerate stories. GramJS uses a user account to read them.
-- **Session persistence**: GramJS sessions should be saved to `TELEGRAM_SESSION_STRING` to avoid re-authentication on each restart.
+- **Captions are dropped**: Instagram stories do not render the caption field.
+- **Rate limit**: 100 API-published posts per rolling 24h; check with
+  `GET /<IG_ID>/content_publishing_limit`.
+- **Token expiry**: long-lived tokens die after 60 days. Refresh via
+  `refreshAccessToken()` or re-issue manually.
+- **Media requirements**: Meta validates format server-side. A rejected video surfaces
+  as a container `ERROR` with little detail.
+- **No tests yet**: `pnpm test` is wired to Jest but no suite exists.
 
 ## License
 

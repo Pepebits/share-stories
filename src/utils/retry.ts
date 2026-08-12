@@ -6,13 +6,19 @@ export interface RetryOptions {
   maxDelayMs: number;
   logger?: Logger;
   operation: string;
+  /**
+   * Return false to give up immediately. Use it for failures that cannot
+   * resolve on their own — a rejected token retried three times just delays
+   * the log line that explains what to fix.
+   */
+  shouldRetry?: (error: Error) => boolean;
 }
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
   options: RetryOptions
 ): Promise<T> {
-  const { maxRetries, baseDelayMs, maxDelayMs, logger, operation } = options;
+  const { maxRetries, baseDelayMs, maxDelayMs, logger, operation, shouldRetry } = options;
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -20,6 +26,11 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (shouldRetry && !shouldRetry(lastError)) {
+        logger?.debug(`[${operation}] not retryable, giving up: ${lastError.message}`);
+        throw lastError;
+      }
 
       if (attempt < maxRetries) {
         const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs);
