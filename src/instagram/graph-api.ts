@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { Logger } from '../utils/logger.js';
 import { StoryMedia } from '../telegram/types.js';
-import { InstagramPublishConfig } from './types.js';
+import { InstagramPublishConfig, PublishTiming } from './types.js';
 import { MediaServer } from '../http/media-server.js';
 import { withRetry } from '../utils/retry.js';
 
@@ -18,14 +18,20 @@ import { withRetry } from '../utils/retry.js';
  */
 
 const API_VERSION = 'v25.0';
-const API_BASE = `https://graph.instagram.com/${API_VERSION}`;
+const DEFAULT_API_BASE = `https://graph.instagram.com/${API_VERSION}`;
+const REFRESH_URL = 'https://graph.instagram.com/refresh_access_token';
 
 /**
  * Meta recommends polling once per minute for at most five minutes. Photos
  * usually finish within seconds, so start tighter and back off to that.
  */
-const POLL_DELAYS_MS = [2_000, 5_000, 10_000, 20_000, 30_000];
-const POLL_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_TIMING: PublishTiming = {
+  pollDelaysMs: [2_000, 5_000, 10_000, 20_000, 30_000],
+  pollTimeoutMs: 5 * 60_000,
+  maxRetries: 2,
+  retryBaseDelayMs: 3_000,
+  retryMaxDelayMs: 15_000,
+};
 
 type ContainerStatus = 'EXPIRED' | 'ERROR' | 'FINISHED' | 'IN_PROGRESS' | 'PUBLISHED';
 
@@ -35,6 +41,13 @@ export class PermanentError extends Error {
 }
 
 const retryUnlessPermanent = (error: Error): boolean => !(error instanceof PermanentError);
+
+const baseUrl = (config: InstagramPublishConfig): string =>
+  (config.apiBase ?? DEFAULT_API_BASE).replace(/\/+$/, '');
+
+const authHeaders = (config: InstagramPublishConfig) => ({
+  Authorization: `Bearer ${config.accessToken}`,
+});
 
 export function isPublishConfigured(config: InstagramPublishConfig): boolean {
   return Boolean(config.accountId && config.accessToken);
@@ -66,10 +79,16 @@ function isPermanent(error: unknown): boolean {
   return status !== undefined && status >= 400 && status < 500 && status !== 429;
 }
 
+function asPermanentIfHopeless(error: unknown): never {
+  if (isPermanent(error)) throw new PermanentError(describeError(error));
+  throw error;
+}
+
 async function createContainer(
   mediaUrl: string,
   media: StoryMedia,
   config: InstagramPublishConfig,
+  timing: PublishTiming,
   logger: Logger
 ): Promise<string> {
   const payload: Record<string, string> = { media_type: 'STORIES' };
@@ -90,56 +109,57 @@ async function createContainer(
   const response = await withRetry(
     async () => {
       try {
-        return await axios.post(`${API_BASE}/${config.accountId}/media`, payload, {
-          headers: { Authorization: `Bearer ${config.accessToken}` },
+        return await axios.post(`${baseUrl(config)}/${config.accountId}/media`, payload, {
+          headers: authHeaders(config),
           timeout: 30_000,
         });
       } catch (error) {
-        if (isPermanent(error)) {
-          throw new PermanentError(describeError(error));
-        }
-        throw error;
+        asPermanentIfHopeless(error);
       }
     },
     {
-      maxRetries: 2,
-      baseDelayMs: 3_000,
-      maxDelayMs: 15_000,
+      maxRetries: timing.maxRetries,
+      baseDelayMs: timing.retryBaseDelayMs,
+      maxDelayMs: timing.retryMaxDelayMs,
       logger,
       operation: 'instagram-create-container',
       shouldRetry: retryUnlessPermanent,
     }
   );
 
-  const containerId = response.data?.id;
+  const containerId = response?.data?.id;
   if (!containerId) {
     throw new Error('Graph API returned no container id');
   }
 
   logger.debug('Story container created', { containerId, storyId: media.id });
-  return containerId;
+  return String(containerId);
 }
 
 async function waitForContainer(
   containerId: string,
   config: InstagramPublishConfig,
+  timing: PublishTiming,
   logger: Logger
 ): Promise<void> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const deadline = Date.now() + timing.pollTimeoutMs;
 
   for (let attempt = 0; Date.now() < deadline; attempt++) {
-    const delay = POLL_DELAYS_MS[Math.min(attempt, POLL_DELAYS_MS.length - 1)];
+    const delay = timing.pollDelaysMs[Math.min(attempt, timing.pollDelaysMs.length - 1)];
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     let status: ContainerStatus;
     try {
-      const response = await axios.get(`${API_BASE}/${containerId}`, {
+      const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
         params: { fields: 'status_code' },
-        headers: { Authorization: `Bearer ${config.accessToken}` },
+        headers: authHeaders(config),
         timeout: 15_000,
       });
       status = response.data?.status_code;
     } catch (error) {
+      if (isPermanent(error)) {
+        throw new PermanentError(describeError(error));
+      }
       // A transient read failure should not abandon an otherwise healthy
       // container; keep polling until the deadline.
       logger.warn('Container status check failed, retrying', {
@@ -156,54 +176,49 @@ async function waitForContainer(
     if (status === 'ERROR' || status === 'EXPIRED') {
       throw new PermanentError(
         `Container ${containerId} ended in status ${status}. ` +
-          'Usually the media failed Meta\'s format checks or PUBLIC_BASE_URL was unreachable.'
+          "Usually the media failed Meta's format checks, or PUBLIC_BASE_URL was unreachable."
       );
     }
 
     logger.debug('Container still processing', { containerId, status });
   }
 
-  throw new Error(`Container ${containerId} did not finish within 5 minutes`);
+  throw new Error(`Container ${containerId} did not finish before the publish timeout`);
 }
 
 async function publishContainer(
   containerId: string,
   config: InstagramPublishConfig,
+  timing: PublishTiming,
   logger: Logger
 ): Promise<string> {
   const response = await withRetry(
     async () => {
       try {
         return await axios.post(
-          `${API_BASE}/${config.accountId}/media_publish`,
+          `${baseUrl(config)}/${config.accountId}/media_publish`,
           { creation_id: containerId },
-          {
-            headers: { Authorization: `Bearer ${config.accessToken}` },
-            timeout: 30_000,
-          }
+          { headers: authHeaders(config), timeout: 30_000 }
         );
       } catch (error) {
-        if (isPermanent(error)) {
-          throw new PermanentError(describeError(error));
-        }
-        throw error;
+        asPermanentIfHopeless(error);
       }
     },
     {
-      maxRetries: 2,
-      baseDelayMs: 3_000,
-      maxDelayMs: 15_000,
+      maxRetries: timing.maxRetries,
+      baseDelayMs: timing.retryBaseDelayMs,
+      maxDelayMs: timing.retryMaxDelayMs,
       logger,
       operation: 'instagram-media-publish',
       shouldRetry: retryUnlessPermanent,
     }
   );
 
-  const mediaId = response.data?.id;
+  const mediaId = response?.data?.id;
   if (!mediaId) {
     throw new Error('Graph API returned no media id after publish');
   }
-  return mediaId;
+  return String(mediaId);
 }
 
 /**
@@ -213,7 +228,8 @@ export async function publishStory(
   media: StoryMedia,
   config: InstagramPublishConfig,
   mediaServer: MediaServer,
-  logger: Logger
+  logger: Logger,
+  timing: PublishTiming = DEFAULT_TIMING
 ): Promise<string> {
   if (!isPublishConfigured(config)) {
     throw new PermanentError(
@@ -231,9 +247,9 @@ export async function publishStory(
   });
 
   try {
-    const containerId = await createContainer(hosted.url, media, config, logger);
-    await waitForContainer(containerId, config, logger);
-    const mediaId = await publishContainer(containerId, config, logger);
+    const containerId = await createContainer(hosted.url, media, config, timing, logger);
+    await waitForContainer(containerId, config, timing, logger);
+    const mediaId = await publishContainer(containerId, config, timing, logger);
 
     logger.info('Story published to Instagram', { storyId: media.id, mediaId });
     return mediaId;
@@ -256,7 +272,7 @@ export async function refreshAccessToken(
   config: InstagramPublishConfig,
   logger: Logger
 ): Promise<{ accessToken: string; expiresInSeconds: number }> {
-  const response = await axios.get('https://graph.instagram.com/refresh_access_token', {
+  const response = await axios.get(config.apiBase ? `${baseUrl(config)}/refresh` : REFRESH_URL, {
     params: { grant_type: 'ig_refresh_token', access_token: config.accessToken },
     timeout: 15_000,
   });
@@ -282,9 +298,9 @@ export async function getAccountInfo(
   logger: Logger
 ): Promise<{ id: string; username: string } | null> {
   try {
-    const response = await axios.get(`${API_BASE}/${config.accountId}`, {
+    const response = await axios.get(`${baseUrl(config)}/${config.accountId}`, {
       params: { fields: 'id,username' },
-      headers: { Authorization: `Bearer ${config.accessToken}` },
+      headers: authHeaders(config),
       timeout: 15_000,
     });
     return response.data;
