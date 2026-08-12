@@ -76,6 +76,23 @@ pnpm run build
 pnpm start              # or: pnpm run dev
 ```
 
+## Tests
+
+```bash
+pnpm test        # node:test via tsx — no credentials or network needed
+pnpm run typecheck
+```
+
+The suite stubs `graph.instagram.com` with a local server, so the publish
+handshake is exercised end to end: container creation, status polling,
+`ERROR`/`EXPIRED` containers, a rejected token aborting without retries, 5xx and
+429 retrying, and the media URL being revoked on both success and failure.
+
+**What it does not cover**: `telegram/reader.ts` (GramJS), `bridge/tg-to-ig.ts`,
+`db/state.ts`, and the startup path in `index.ts` are untested. Whether Meta
+accepts a given video's format, and whether it can reach `PUBLIC_BASE_URL`, can
+only be learned from a real publish.
+
 On first run, leave `TELEGRAM_SESSION_STRING` empty. The session is written to
 `./data/telegram-session.txt` with mode `0600` — copy it into `.env` and delete the
 file. It is never logged: it grants full access to the Telegram account.
@@ -109,7 +126,7 @@ sudo journalctl -u share-historys -f
   `refreshAccessToken()` or re-issue manually.
 - **Media requirements**: Meta validates format server-side. A rejected video surfaces
   as a container `ERROR` with little detail.
-- **No tests yet**: `pnpm test` is wired to Jest but no suite exists.
+- **Partial test coverage**: see the Tests section for what is and is not verified.
 
 ## License
 

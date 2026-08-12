@@ -10,7 +10,8 @@
     "dev": "tsx src/index.ts",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "keywords": [
     "telegram",
@@ -44,15 +45,11 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
-    "@types/jest": "^29.5.14",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "eslint": "^9.16.0",
-    "jest": "^30.0.0",
     "prettier": "^3.4.2",
-    "ts-jest": "^29.2.5",
-    "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0"
   }
