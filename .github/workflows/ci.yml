@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The suite binds fixed ports (45790-45812). Two runs sharing this self-hosted
+# runner would collide on them, so only one is allowed in flight per ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: [self-hosted, Linux, X64]
+    # A hung job on a self-hosted runner blocks every later run, unlike a
+    # hosted runner that is torn down regardless.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must precede setup-node: the pnpm cache lookup needs the store path.
+      # Reads the version from package.json "packageManager".
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install
+        # Fails rather than rewriting the lockfile if package.json drifted.
+        # Install scripts stay limited to pnpm.onlyBuiltDependencies.
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm test
+
+  audit:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Runtime dependencies only. Advisories in eslint and friends never reach
+      # the deployed process, and blocking merges on them trains people to
+      # ignore the check. Kept as its own job so a new advisory is visibly
+      # distinct from a genuine test failure.
+      - name: Audit runtime dependencies
+        run: pnpm audit --prod
