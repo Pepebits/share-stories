@@ -9,9 +9,9 @@ export function createLogger(level: string = 'info'): Logger {
       winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
       winston.format.errors({ stack: true }),
       winston.format.printf(({ timestamp, level, message, stack, ...rest }) => {
-        const base = `${timestamp} [${level.toUpperCase()}] ${message}`;
+        const base = `${String(timestamp)} [${level.toUpperCase()}] ${String(message)}`;
         const extra = Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : '';
-        const errStack = stack ? `\n${stack}` : '';
+        const errStack = typeof stack === 'string' ? `\n${stack}` : '';
         return `${base}${extra}${errStack}`;
       })
     ),

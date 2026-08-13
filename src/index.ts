@@ -25,7 +25,7 @@ async function main(): Promise<void> {
 
   await ensureTempDir(config.tempDir);
   const cleanupInterval = setInterval(
-    () => cleanupTempDir(config.tempDir, 3_600_000, logger),
+    () => void cleanupTempDir(config.tempDir, 3_600_000, logger),
     1_800_000
   );
 

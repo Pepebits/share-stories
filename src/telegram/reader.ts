@@ -3,6 +3,7 @@ import { StringSession } from 'telegram/sessions/index.js';
 import { Api } from 'telegram';
 import { Logger } from '../utils/logger.js';
 import { StoryMedia } from './types.js';
+import { isVideoBuffer } from '../bridge/media.js';
 import { createHash } from 'crypto';
 
 export interface TelegramReaderConfig {
@@ -39,14 +40,13 @@ export class TelegramStoryReader {
 
     await this.client.start({
       phoneNumber: this.config.phoneNumber,
-      phoneCode: async () => {
-        // In production, you'd wire this to a user-input mechanism
-        // For now, we expect the session to already be authenticated
-        throw new Error(
-          'Phone code required. Please authenticate interactively first ' +
-            'or provide a valid session string in TELEGRAM_SESSION_STRING.'
-        );
-      },
+      phoneCode: () =>
+        Promise.reject(
+          new Error(
+            'Phone code required. Please authenticate interactively first ' +
+              'or provide a valid session string in TELEGRAM_SESSION_STRING.'
+          )
+        ),
       onError: (err: Error) => {
         this.logger.error('GramJS connection error', { error: err.message });
       },
@@ -120,11 +120,7 @@ export class TelegramStoryReader {
         }
 
         try {
-          const media = await this.downloadStoryMedia(
-            story,
-            peerUsername,
-            storiesData
-          );
+          const media = await this.downloadStoryMedia(story, peerUsername);
 
           if (media) {
             results.push(media);
@@ -149,8 +145,7 @@ export class TelegramStoryReader {
 
   private async downloadStoryMedia(
     story: any,
-    peerUsername: string,
-    storiesData: any
+    peerUsername: string
   ): Promise<StoryMedia | null> {
     if (!this.client) return null;
 
@@ -161,8 +156,12 @@ export class TelegramStoryReader {
       .substring(0, 16);
 
     let mediaBuffer: Buffer | null = null;
-    let mediaType: 'photo' | 'video' = 'photo';
-    let caption: string | undefined;
+    // Telegram carries the story's own text here; it used to be declared and
+    // never read, so every story fell through to the generic label below.
+    const caption: string | undefined =
+      typeof story.caption === 'string' && story.caption.length > 0
+        ? story.caption
+        : undefined;
 
     // Try to download the story media
     try {
@@ -203,14 +202,7 @@ export class TelegramStoryReader {
       return null;
     }
 
-    // Detect media type from magic bytes
-    if (mediaBuffer.length > 3) {
-      // Check for video signatures (ftyp box, webm, etc.)
-      const isVideo =
-        (mediaBuffer[0] === 0x1a && mediaBuffer[1] === 0x45) || // webm
-        (mediaBuffer[4] === 0x66 && mediaBuffer[5] === 0x74 && mediaBuffer[6] === 0x79 && mediaBuffer[7] === 0x70); // mp4 ftyp
-      mediaType = isVideo ? 'video' : 'photo';
-    }
+    const mediaType: 'photo' | 'video' = isVideoBuffer(mediaBuffer) ? 'video' : 'photo';
 
     return {
       id: storyId,
