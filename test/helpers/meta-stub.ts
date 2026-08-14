@@ -46,6 +46,10 @@ export class MetaStub {
   createResponses: StubResponse[] = [];
   publishResponses: StubResponse[] = [];
   statusResponses: StubResponse[] = [];
+  refreshResponses: StubResponse[] = [];
+
+  /** Increments per refresh so successive tokens are distinguishable. */
+  refreshCount = 0;
 
   /** When true, the stub downloads the media URL exactly as Meta would. */
   downloadMedia = false;
@@ -121,6 +125,16 @@ export class MetaStub {
     if (req.method === 'POST' && path.endsWith('/media')) {
       if (this.downloadMedia) await this.download(body);
       reply(this.createResponses.shift() ?? { status: 200, body: { id: 'container_1' } });
+      return;
+    }
+
+    if (req.method === 'GET' && path.endsWith('/refresh_access_token')) {
+      reply(
+        this.refreshResponses.shift() ?? {
+          status: 200,
+          body: { access_token: `refreshed_${++this.refreshCount}`, expires_in: 5_184_000 },
+        }
+      );
       return;
     }
 

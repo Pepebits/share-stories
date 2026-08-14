@@ -8,7 +8,12 @@ import { MediaServer } from '../http/media-server.js';
 export interface TgToIgConfig {
   pollIntervalMs: number;
   monitoredPeers: string[];
-  instagram: InstagramPublishConfig;
+  /**
+   * Resolved per publish rather than captured once: the access token is
+   * rotated in the background by TokenManager, and a captured copy would go
+   * stale 60 days in without anything failing loudly.
+   */
+  instagram: () => InstagramPublishConfig;
 }
 
 export interface Bridge {
@@ -33,7 +38,7 @@ export function createTgToIgBridge(
     store.markProcessing(story.id, 'telegram', story.sourceUser, 'instagram');
 
     try {
-      const mediaId = await publishStory(story, config.instagram, mediaServer, logger);
+      const mediaId = await publishStory(story, config.instagram(), mediaServer, logger);
       store.markPosted(story.id, 'telegram', 'instagram');
       logger.info('TG→IG story bridged', {
         from: story.id,

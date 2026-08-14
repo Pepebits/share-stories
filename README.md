@@ -109,6 +109,19 @@ only be learned from a real publish.
 Failures are recorded in the state store, and permanent ones (rejected token, bad
 media) are not retried.
 
+### Token rotation
+
+Instagram's long-lived tokens expire 60 days after issue, and refreshing mints a
+*new* one — so the live token cannot stay in an immutable `.env`.
+
+`INSTAGRAM_ACCESS_TOKEN` seeds the chain. From then on the app refreshes once
+fewer than 14 days remain (checked every 12h) and persists the result to
+`INSTAGRAM_TOKEN_FILE` with mode `0600`, reloading it on every boot. Meta rejects
+refreshes for tokens younger than 24 hours; that is expected and simply retried.
+
+To take over manually, paste a new token into `.env`: the stored chain is
+discarded as soon as the seed value no longer matches.
+
 ## Deployment
 
 ```bash
@@ -122,8 +135,7 @@ sudo journalctl -u share-historys -f
 - **Captions are dropped**: Instagram stories do not render the caption field.
 - **Rate limit**: 100 API-published posts per rolling 24h; check with
   `GET /<IG_ID>/content_publishing_limit`.
-- **Token expiry**: long-lived tokens die after 60 days. Refresh via
-  `refreshAccessToken()` or re-issue manually.
+- **Token expiry**: handled automatically — see below.
 - **Media requirements**: Meta validates format server-side. A rejected video surfaces
   as a container `ERROR` with little detail.
 - **Partial test coverage**: see the Tests section for what is and is not verified.
