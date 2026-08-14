@@ -32,7 +32,10 @@
       "unrs-resolver"
     ],
     "overrides": {
-      "ip-address@<10.2.1": ">=10.2.1"
+      "ip-address@<10.2.1": ">=10.2.1",
+      "js-yaml@^4.0.0": "^4.3.1",
+      "brace-expansion@^1.0.0": "^1.1.18",
+      "brace-expansion@^5.0.0": "^5.0.9"
     }
   },
   "dependencies": {
@@ -44,7 +47,7 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
