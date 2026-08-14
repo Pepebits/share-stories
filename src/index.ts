@@ -6,6 +6,7 @@ import { createLogger } from './utils/logger.js';
 import { StateStore } from './db/state.js';
 import { TelegramStoryReader } from './telegram/reader.js';
 import { getAccountInfo } from './instagram/graph-api.js';
+import { TokenManager, DEFAULT_TOKEN_OPTIONS } from './instagram/token-manager.js';
 import { MediaServer } from './http/media-server.js';
 import { createTgToIgBridge } from './bridge/tg-to-ig.js';
 import { cleanupTempDir, ensureTempDir } from './bridge/media.js';
@@ -29,9 +30,24 @@ async function main(): Promise<void> {
     1_800_000
   );
 
-  // Verify the Instagram token before a story ever arrives, so a bad token
-  // surfaces at boot rather than at 3am when something is worth reposting.
-  const account = await getAccountInfo(config.instagram, logger);
+  // Long-lived tokens expire after 60 days, so the running token is whatever
+  // the last refresh produced — not necessarily what is sitting in .env.
+  const tokens = new TokenManager(
+    {
+      filePath: resolve(config.projectRoot, config.instagramTokenFile),
+      envToken: config.instagram.accessToken,
+      accountId: config.instagram.accountId,
+      ...DEFAULT_TOKEN_OPTIONS,
+    },
+    logger
+  );
+  await tokens.load();
+  await tokens.refreshIfNeeded();
+  tokens.start();
+
+  // Verify the token before a story ever arrives, so a bad one surfaces at
+  // boot rather than at 3am when something is worth reposting.
+  const account = await getAccountInfo(tokens.config(), logger);
   if (!account) {
     throw new Error(
       'Instagram credentials rejected. Check INSTAGRAM_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN ' +
@@ -83,7 +99,7 @@ async function main(): Promise<void> {
     {
       pollIntervalMs: config.pollIntervalSeconds * 1000,
       monitoredPeers: config.telegram.monitoredPeers,
-      instagram: config.instagram,
+      instagram: () => tokens.config(),
     },
     logger
   );
@@ -105,6 +121,7 @@ async function main(): Promise<void> {
     logger.info(`Received ${signal}, shutting down...`);
 
     bridge.stop();
+    tokens.stop();
     clearInterval(cleanupInterval);
 
     await mediaServer.stop().catch((error: Error) =>

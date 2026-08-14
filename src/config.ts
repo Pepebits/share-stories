@@ -61,6 +61,7 @@ export interface AppConfig {
   databasePath: string;
   tempDir: string;
   sessionFilePath: string;
+  instagramTokenFile: string;
   logLevel: string;
   projectRoot: string;
 }
@@ -116,6 +117,7 @@ export function loadConfig(): AppConfig {
     databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
     tempDir: optionalEnv('TEMP_DIR', './data/temp'),
     sessionFilePath: optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt'),
+    instagramTokenFile: optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json'),
     logLevel: optionalEnv('LOG_LEVEL', 'info'),
   };
 }

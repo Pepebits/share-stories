@@ -272,10 +272,17 @@ export async function refreshAccessToken(
   config: InstagramPublishConfig,
   logger: Logger
 ): Promise<{ accessToken: string; expiresInSeconds: number }> {
-  const response = await axios.get(config.apiBase ? `${baseUrl(config)}/refresh` : REFRESH_URL, {
+  // The live refresh endpoint is unversioned, unlike the publishing ones.
+  const url = config.apiBase ? `${baseUrl(config)}/refresh_access_token` : REFRESH_URL;
+
+  const response = await axios.get(url, {
     params: { grant_type: 'ig_refresh_token', access_token: config.accessToken },
     timeout: 15_000,
   });
+
+  if (response.status >= 400) {
+    throw new Error(`Token refresh rejected with status ${response.status}`);
+  }
 
   const accessToken = response.data?.access_token;
   if (!accessToken) {
