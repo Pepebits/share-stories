@@ -4,6 +4,7 @@ import { Api } from 'telegram';
 import { Logger } from '../utils/logger.js';
 import { StoryMedia } from './types.js';
 import { isVideoBuffer } from '../bridge/media.js';
+import { prompt } from '../utils/prompt.js';
 import { createHash } from 'crypto';
 
 export interface TelegramReaderConfig {
@@ -40,13 +41,11 @@ export class TelegramStoryReader {
 
     await this.client.start({
       phoneNumber: this.config.phoneNumber,
-      phoneCode: () =>
-        Promise.reject(
-          new Error(
-            'Phone code required. Please authenticate interactively first ' +
-              'or provide a valid session string in TELEGRAM_SESSION_STRING.'
-          )
-        ),
+      // Telegram sends this to the account's other devices when the session
+      // string is absent or stale. Without a terminal, prompt() refuses
+      // rather than blocking on stdin forever.
+      phoneCode: () => prompt('Telegram login code: '),
+      password: () => prompt('Telegram 2FA password: ', true),
       onError: (err: Error) => {
         this.logger.error('GramJS connection error', { error: err.message });
       },
