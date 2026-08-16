@@ -74,10 +74,15 @@ export class StateStore {
     sourceUser: string,
     targetPlatform: Platform
   ): void {
+    // A retry of a previously failed story must move back to 'processing';
+    // INSERT OR IGNORE would leave it marked 'failed' for the whole attempt,
+    // so isProcessed() would not protect it.
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO stories (story_id, platform, source_user, target_platform, status)
-         VALUES (?, ?, ?, ?, 'processing')`
+        `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
+         VALUES (?, ?, ?, ?, 'processing')
+         ON CONFLICT(platform, story_id, target_platform)
+         DO UPDATE SET status = 'processing', error_message = NULL`
       )
       .run(storyId, sourcePlatform, sourceUser, targetPlatform);
   }

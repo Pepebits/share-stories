@@ -44,6 +44,9 @@ export interface TelegramConfig {
 export interface InstagramConfig {
   accountId: string;
   accessToken: string;
+  /** Publishes held back from the 100/24h quota, e.g. for posting by hand. */
+  quotaReserve: number;
+  quotaRefreshSeconds: number;
 }
 
 export interface MediaServerSettings {
@@ -105,6 +108,8 @@ export function loadConfig(): AppConfig {
     instagram: {
       accountId: requireEnv('INSTAGRAM_ACCOUNT_ID'),
       accessToken: requireEnv('INSTAGRAM_ACCESS_TOKEN'),
+      quotaReserve: parseIntEnv('INSTAGRAM_QUOTA_RESERVE', 0),
+      quotaRefreshSeconds: parseIntEnv('INSTAGRAM_QUOTA_REFRESH_SECONDS', 600),
     },
     mediaServer: {
       port: parseIntEnv('MEDIA_SERVER_PORT', 8080),

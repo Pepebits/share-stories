@@ -7,7 +7,8 @@ import { TokenManager, type StoredToken } from '../src/instagram/token-manager.j
 import { MetaStub, metaError } from './helpers/meta-stub.js';
 import { silentLogger } from './helpers/logger.js';
 
-const META_PORT = 45830;
+// Fresh port per test — see quota.test.ts for why.
+let nextPort = 45870;
 const DAY_MS = 86_400_000;
 
 describe('TokenManager', () => {
@@ -34,7 +35,7 @@ describe('TokenManager', () => {
 
   beforeEach(async () => {
     meta = new MetaStub();
-    await meta.start(META_PORT);
+    await meta.start(nextPort++);
     dir = await mkdtemp(join(tmpdir(), 'token-manager-'));
     tokenFile = join(dir, 'instagram-token.json');
   });

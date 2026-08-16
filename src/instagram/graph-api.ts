@@ -296,6 +296,48 @@ export async function refreshAccessToken(
   return { accessToken, expiresInSeconds: response.data.expires_in ?? 0 };
 }
 
+export interface PublishingLimit {
+  used: number;
+  total: number;
+  remaining: number;
+  /** Window the quota is measured over, in seconds. */
+  durationSeconds: number;
+}
+
+/**
+ * Meta's authoritative view of the rolling publish quota.
+ *
+ * Confirmed against the live API: stories DO consume it — one published story
+ * moved quota_usage from 0 to 1 — despite some docs implying otherwise.
+ */
+export async function getPublishingLimit(
+  config: InstagramPublishConfig,
+  logger: Logger
+): Promise<PublishingLimit> {
+  const response = await axios.get(`${baseUrl(config)}/${config.accountId}/content_publishing_limit`, {
+    params: { fields: 'quota_usage,config' },
+    headers: authHeaders(config),
+    timeout: 15_000,
+  });
+
+  const entry = response.data?.data?.[0];
+  if (!entry) {
+    throw new Error('content_publishing_limit returned no data');
+  }
+
+  const used = Number(entry.quota_usage ?? 0);
+  const total = Number(entry.config?.quota_total ?? 100);
+
+  logger.debug('Fetched publishing quota', { used, total });
+
+  return {
+    used,
+    total,
+    remaining: Math.max(0, total - used),
+    durationSeconds: Number(entry.config?.quota_duration ?? 86_400),
+  };
+}
+
 /**
  * Fetch the authenticated account, used at startup to prove the token works
  * before any story arrives.

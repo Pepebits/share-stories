@@ -122,6 +122,24 @@ refreshes for tokens younger than 24 hours; that is expected and simply retried.
 To take over manually, paste a new token into `.env`: the stored chain is
 discarded as soon as the seed value no longer matches.
 
+### Publish quota
+
+Instagram allows 100 API publishes per rolling 24 hours, and **stories consume
+it like anything else** — verified live, not inferred from the docs.
+
+Going over does not fail cheaply: Meta only refuses at `/media_publish`, after
+the container has been built and the media already served. So the quota is
+checked *before* each story is touched, using `GET
+/<IG_ID>/content_publishing_limit` as the authority. Readings are cached for
+`INSTAGRAM_QUOTA_REFRESH_SECONDS` and counted down locally in between.
+
+Hitting the limit is treated as "come back later", not as a failed story: the
+cycle pauses and the story stays unprocessed for a later poll. Set
+`INSTAGRAM_QUOTA_RESERVE` to keep some headroom for posting by hand.
+
+If the quota has never been read successfully, publishing is refused rather
+than attempted blind.
+
 ## Deployment
 
 ```bash
@@ -133,8 +151,9 @@ sudo journalctl -u share-historys -f
 ## Limitations
 
 - **Captions are dropped**: Instagram stories do not render the caption field.
-- **Rate limit**: 100 API-published posts per rolling 24h; check with
-  `GET /<IG_ID>/content_publishing_limit`.
+- **Rate limit**: 100 API publishes per rolling 24h. Stories count towards it —
+  confirmed against the live API, where one published story moved `quota_usage`
+  from 0 to 1. Enforced before publishing; see below.
 - **Token expiry**: handled automatically — see below.
 - **Media requirements**: Meta validates format server-side. A rejected video surfaces
   as a container `ERROR` with little detail.
