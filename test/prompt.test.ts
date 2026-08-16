@@ -1,54 +1,166 @@
-import { afterEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isInteractive, NonInteractiveError, prompt } from '../src/utils/prompt.js';
+import { EventEmitter } from 'node:events';
+import { isInteractive, NonInteractiveError, prompt, type PromptIO } from '../src/utils/prompt.js';
 
 /**
- * The property that matters in production: under systemd there is no terminal,
- * and a prompt that waits on stdin would hang the service forever instead of
- * reporting that it needs a session string.
+ * The masked branch used to reach for readline's private _writeToOutput,
+ * which does not exist on readline/promises — so asking for the 2FA password
+ * threw "Cannot read properties of undefined (reading 'bind')". GramJS
+ * retries that step in a loop, so it surfaced as an endless stream of
+ * connection errors rather than as the bug it was.
  */
+
+class FakeInput extends EventEmitter {
+  isTTY = true;
+  isRaw = false;
+  rawModeCalls: boolean[] = [];
+  setRawMode(value: boolean) {
+    this.isRaw = value;
+    this.rawModeCalls.push(value);
+    return this;
+  }
+  resume() {
+    return this;
+  }
+  pause() {
+    return this;
+  }
+  setEncoding() {
+    return this;
+  }
+  type(text: string) {
+    this.emit('data', text);
+  }
+}
+
+class FakeOutput extends EventEmitter {
+  isTTY = true;
+  written = '';
+  write(chunk: string) {
+    this.written += chunk;
+    return true;
+  }
+}
+
+const makeIO = () => {
+  const input = new FakeInput();
+  const output = new FakeOutput();
+  return { io: { input, output } as unknown as PromptIO, input, output };
+};
+
 describe('prompt', () => {
-  const stdinTTY = process.stdin.isTTY;
-  const stdoutTTY = process.stdout.isTTY;
+  describe('without a terminal', () => {
+    const headless = {
+      input: { isTTY: false },
+      output: { isTTY: false },
+    } as unknown as PromptIO;
 
-  afterEach(() => {
-    process.stdin.isTTY = stdinTTY;
-    process.stdout.isTTY = stdoutTTY;
+    it('reports non-interactive', () => {
+      assert.equal(isInteractive(headless), false);
+    });
+
+    it('rejects instead of hanging', async () => {
+      await assert.rejects(
+        () => prompt('Telegram login code: ', false, headless),
+        (error: Error) => {
+          assert.ok(error instanceof NonInteractiveError);
+          assert.match(error.message, /TELEGRAM_SESSION_STRING/);
+          return true;
+        }
+      );
+    });
+
+    it('names the thing it could not ask for', async () => {
+      await assert.rejects(
+        () => prompt('Telegram 2FA password: ', true, headless),
+        /Telegram 2FA password/
+      );
+    });
   });
 
-  it('reports non-interactive when stdin is not a TTY', () => {
-    process.stdin.isTTY = false;
-    process.stdout.isTTY = true;
-    assert.equal(isInteractive(), false);
-  });
+  describe('masked input', () => {
+    it('returns what was typed', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
 
-  it('reports non-interactive when stdout is redirected', () => {
-    process.stdin.isTTY = true;
-    process.stdout.isTTY = false;
-    assert.equal(isInteractive(), false);
-  });
+      input.type('hunter2');
+      input.type('\r');
 
-  it('rejects instead of hanging when there is no terminal', async () => {
-    process.stdin.isTTY = false;
-    process.stdout.isTTY = false;
+      assert.equal(await answer, 'hunter2');
+    });
 
-    await assert.rejects(
-      () => prompt('Telegram login code: '),
-      (error: Error) => {
-        assert.ok(error instanceof NonInteractiveError);
-        assert.match(error.message, /TELEGRAM_SESSION_STRING/);
-        return true;
-      }
-    );
-  });
+    it('never echoes the characters', async () => {
+      const { io, input, output } = makeIO();
+      const answer = prompt('Password: ', true, io);
 
-  it('names the thing it could not ask for', async () => {
-    process.stdin.isTTY = false;
-    process.stdout.isTTY = false;
+      input.type('secret');
+      input.type('\r');
+      await answer;
 
-    await assert.rejects(
-      () => prompt('Telegram 2FA password: ', true),
-      /Telegram 2FA password/
-    );
+      assert.equal(output.written.includes('secret'), false, 'the password leaked to the terminal');
+      assert.equal(output.written, 'Password: ******\n');
+    });
+
+    it('handles backspace', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('abcX');
+      input.type('');
+      input.type('d');
+      input.type('\r');
+
+      assert.equal(await answer, 'abcd');
+    });
+
+    it('ignores stray control characters', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('ab');
+      input.type('\r');
+
+      assert.equal(await answer, 'ab');
+    });
+
+    it('accepts input arriving in one chunk', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('all-at-once\n');
+
+      assert.equal(await answer, 'all-at-once');
+    });
+
+    it('honours Ctrl-C, which raw mode would otherwise swallow', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('');
+
+      await assert.rejects(() => answer, /Cancelled/);
+    });
+
+    it('restores the terminal afterwards', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('x\r');
+      await answer;
+
+      assert.deepEqual(input.rawModeCalls, [true, false]);
+      assert.equal(input.isRaw, false);
+    });
+
+    it('restores the terminal even when cancelled', async () => {
+      const { io, input } = makeIO();
+      const answer = prompt('Password: ', true, io);
+
+      input.type('');
+      await answer.catch(() => {});
+
+      assert.equal(input.isRaw, false);
+    });
   });
 });

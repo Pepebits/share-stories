@@ -5,14 +5,26 @@ import { createInterface } from 'node:readline/promises';
  * it is asked for. Under systemd there is no one to ask, so prompting must
  * fail loudly instead of hanging forever on a stdin that will never deliver.
  */
-export function isInteractive(): boolean {
-  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+
+export interface PromptIO {
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+}
+
+const defaultIO = (): PromptIO => ({ input: process.stdin, output: process.stdout });
+
+export function isInteractive(io: PromptIO = defaultIO()): boolean {
+  return io.input.isTTY === true && io.output.isTTY === true;
 }
 
 export class NonInteractiveError extends Error {}
 
-export async function prompt(question: string, mask = false): Promise<string> {
-  if (!isInteractive()) {
+export async function prompt(
+  question: string,
+  mask = false,
+  io: PromptIO = defaultIO()
+): Promise<string> {
+  if (!isInteractive(io)) {
     throw new NonInteractiveError(
       `Cannot ask for "${question.trim()}" without a terminal. ` +
         'Run the app interactively once to authenticate, then put the resulting ' +
@@ -20,36 +32,77 @@ export async function prompt(question: string, mask = false): Promise<string> {
     );
   }
 
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-  });
+  return mask ? readMasked(question, io) : readPlain(question, io);
+}
 
+async function readPlain(question: string, io: PromptIO): Promise<string> {
+  const rl = createInterface({ input: io.input, output: io.output, terminal: true });
   try {
-    if (!mask) {
-      return (await rl.question(question)).trim();
-    }
-
-    // readline has no supported way to suppress echo, and a 2FA password
-    // must not be left sitting in the scrollback.
-    const internal = rl as unknown as {
-      output: NodeJS.WriteStream;
-      _writeToOutput: (text: string) => void;
-    };
-    const original = internal._writeToOutput.bind(rl);
-
-    internal._writeToOutput = (text: string) => {
-      // The prompt itself still has to be visible; only the typed reply is hidden.
-      if (text.includes(question)) original(text);
-      else if (text.trim().length > 0) internal.output.write('*');
-      else original(text);
-    };
-
-    const answer = await rl.question(question);
-    internal.output.write('\n');
-    return answer.trim();
+    return (await rl.question(question)).trim();
   } finally {
     rl.close();
   }
+}
+
+/**
+ * A 2FA password must not be left in the scrollback, and readline offers no
+ * supported way to suppress echo — the private hook this used to reach for
+ * does not even exist on readline/promises. So the terminal is put in raw
+ * mode and the keystrokes are handled here.
+ */
+function readMasked(question: string, io: PromptIO): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const { input, output } = io;
+    const wasRaw = input.isRaw;
+
+    output.write(question);
+    input.setRawMode(true);
+    input.resume();
+    input.setEncoding('utf8');
+
+    let value = '';
+
+    const cleanup = () => {
+      input.off('data', onData);
+      input.setRawMode(wasRaw ?? false);
+      input.pause();
+    };
+
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        switch (char) {
+          case '\r':
+          case '\n':
+            cleanup();
+            output.write('\n');
+            resolve(value.trim());
+            return;
+
+          // Ctrl-C: raw mode swallows the signal, so honour it by hand.
+          case '\u0003':
+            cleanup();
+            output.write('\n');
+            reject(new Error('Cancelled'));
+            return;
+
+          case '\u007f':
+          case '\b':
+            if (value.length > 0) {
+              value = value.slice(0, -1);
+              output.write('\b \b');
+            }
+            break;
+
+          default:
+            // Ignore other control characters rather than storing them.
+            if (char >= ' ') {
+              value += char;
+              output.write('*');
+            }
+        }
+      }
+    };
+
+    input.on('data', onData);
+  });
 }
