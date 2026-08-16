@@ -47,6 +47,11 @@ export class MetaStub {
   publishResponses: StubResponse[] = [];
   statusResponses: StubResponse[] = [];
   refreshResponses: StubResponse[] = [];
+  quotaResponses: StubResponse[] = [];
+
+  /** Meta's view of the rolling publish quota. */
+  quotaUsage = 0;
+  quotaTotal = 100;
 
   /** Increments per refresh so successive tokens are distinguishable. */
   refreshCount = 0;
@@ -87,6 +92,11 @@ export class MetaStub {
     const server = this.server;
     if (!server) return;
     this.server = null;
+
+    // close() alone leaves keep-alive sockets open, and axios will happily
+    // reuse one against the next test's server — which shows up as a random
+    // ECONNRESET in whichever test drew the stale socket.
+    server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
@@ -125,6 +135,23 @@ export class MetaStub {
     if (req.method === 'POST' && path.endsWith('/media')) {
       if (this.downloadMedia) await this.download(body);
       reply(this.createResponses.shift() ?? { status: 200, body: { id: 'container_1' } });
+      return;
+    }
+
+    if (req.method === 'GET' && path.endsWith('/content_publishing_limit')) {
+      reply(
+        this.quotaResponses.shift() ?? {
+          status: 200,
+          body: {
+            data: [
+              {
+                quota_usage: this.quotaUsage,
+                config: { quota_total: this.quotaTotal, quota_duration: 86_400 },
+              },
+            ],
+          },
+        }
+      );
       return;
     }
 

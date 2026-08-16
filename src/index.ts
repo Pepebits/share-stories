@@ -7,6 +7,7 @@ import { StateStore } from './db/state.js';
 import { TelegramStoryReader } from './telegram/reader.js';
 import { getAccountInfo } from './instagram/graph-api.js';
 import { TokenManager, DEFAULT_TOKEN_OPTIONS } from './instagram/token-manager.js';
+import { QuotaGuard } from './instagram/quota.js';
 import { MediaServer } from './http/media-server.js';
 import { createTgToIgBridge } from './bridge/tg-to-ig.js';
 import { cleanupTempDir, ensureTempDir } from './bridge/media.js';
@@ -56,6 +57,25 @@ async function main(): Promise<void> {
   }
   logger.info(`Instagram account ready: @${account.username}`);
 
+  const quota = new QuotaGuard(
+    () => tokens.config(),
+    {
+      reserve: config.instagram.quotaReserve,
+      refreshIntervalMs: config.instagram.quotaRefreshSeconds * 1000,
+    },
+    logger
+  );
+
+  // Read it once at boot so the first story does not discover the quota is
+  // already spent after building a container for nothing.
+  await quota.ensureCapacity().catch(() => {});
+  if (quota.snapshot) {
+    logger.info(
+      `Publish quota: ${quota.snapshot.used}/${quota.snapshot.total} used ` +
+        `in the last ${Math.round(quota.snapshot.durationSeconds / 3600)}h`
+    );
+  }
+
   const mediaServer = new MediaServer(
     {
       port: config.mediaServer.port,
@@ -100,6 +120,7 @@ async function main(): Promise<void> {
       pollIntervalMs: config.pollIntervalSeconds * 1000,
       monitoredPeers: config.telegram.monitoredPeers,
       instagram: () => tokens.config(),
+      quota,
     },
     logger
   );

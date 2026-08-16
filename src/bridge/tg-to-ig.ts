@@ -3,11 +3,13 @@ import { publishStory, PermanentError } from '../instagram/graph-api.js';
 import { StateStore } from '../db/state.js';
 import { Logger } from '../utils/logger.js';
 import { InstagramPublishConfig } from '../instagram/types.js';
+import { QuotaGuard, QuotaExceededError } from '../instagram/quota.js';
 import { MediaServer } from '../http/media-server.js';
 
 export interface TgToIgConfig {
   pollIntervalMs: number;
   monitoredPeers: string[];
+  quota: QuotaGuard;
   /**
    * Resolved per publish rather than captured once: the access token is
    * rotated in the background by TokenManager, and a captured copy would go
@@ -39,6 +41,7 @@ export function createTgToIgBridge(
 
     try {
       const mediaId = await publishStory(story, config.instagram(), mediaServer, logger);
+      config.quota.recordPublish();
       store.markPosted(story.id, 'telegram', 'instagram');
       logger.info('TG→IG story bridged', {
         from: story.id,
@@ -66,6 +69,20 @@ export function createTgToIgBridge(
       for (const story of stories) {
         if (!running) break;
         if (store.isProcessed(story.id, 'telegram', 'instagram')) continue;
+
+        try {
+          // Checked before the story is touched: exceeding the quota is a
+          // "come back later", not a failure, so the story must stay
+          // unprocessed and be picked up again on a later cycle.
+          await config.quota.ensureCapacity();
+        } catch (error) {
+          if (error instanceof QuotaExceededError) {
+            logger.warn(`${error.message}. Pausing until the window frees up.`);
+            break;
+          }
+          throw error;
+        }
+
         await publish(story);
       }
     } catch (error) {
