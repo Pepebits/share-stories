@@ -40,7 +40,7 @@ not an oversight. See git history for the removed implementation.
 
 - **Runtime**: Node.js 22+ (ESM) · **Language**: TypeScript 5.9 · **Package manager**: pnpm 10
 - **Telegram (reading)**: GramJS (`telegram`, MTProto)
-- **Instagram (publishing)**: Content Publishing API via `graph.instagram.com` v25.0
+- **Instagram (publishing)**: Content Publishing API via `graph.instagram.com` v26.0
 - **State**: SQLite (`better-sqlite3`) · **Logging**: Winston
 
 ## Prerequisites
