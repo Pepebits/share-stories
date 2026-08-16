@@ -17,7 +17,9 @@ import { withRetry } from '../utils/retry.js';
  * See MediaServer for how that URL is produced and revoked.
  */
 
-const API_VERSION = 'v25.0';
+// Verified against the live API: v26 behaves identically to v25 for account
+// lookup, content_publishing_limit, container creation and status polling.
+const API_VERSION = 'v26.0';
 const DEFAULT_API_BASE = `https://graph.instagram.com/${API_VERSION}`;
 const REFRESH_URL = 'https://graph.instagram.com/refresh_access_token';
 
