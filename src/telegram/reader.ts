@@ -73,63 +73,73 @@ export class TelegramStoryReader {
     const results: StoryMedia[] = [];
 
     try {
-      // First, get all active stories
-      const allStories = await this.client.invoke(
-        new Api.stories.GetAllStories({})
-      );
+      const response = (await this.client.invoke(new Api.stories.GetAllStories({}))) as any;
 
-      if (!allStories || !(allStories as any).stories) {
-        this.logger.debug('No active stories found');
-        return results;
-      }
-
-      const storiesData = allStories as any;
-      const stories = storiesData.stories || [];
-      const users = storiesData.users || [];
-      const chats = storiesData.chats || [];
+      // The API returns peerStories: one entry per peer, each holding that
+      // peer's active stories. It is not a flat list, and the peer lives on
+      // the entry rather than on the individual story.
+      const feed = response?.peerStories ?? [];
+      const users = response?.users ?? [];
+      const chats = response?.chats ?? [];
 
       this.logger.debug('Fetched stories from Telegram', {
-        storyCount: stories.length,
-        userCount: users.length,
-        chatCount: chats.length,
+        peers: feed.length,
+        stories: feed.reduce((n: number, e: any) => n + (e.stories?.length ?? 0), 0),
       });
 
-      // Build a map of peer ID → username
-      const peerMap = new Map<string, string>();
-      for (const user of users) {
-        if (user.username) {
-          peerMap.set(user.id.toString(), user.username.toLowerCase());
+      if (feed.length === 0) return results;
+
+      // A peer must be addressable several ways:
+      //  - Telegram supports multiple usernames, and when it does the legacy
+      //    `username` field is null while the real ones sit in `usernames[]`.
+      //  - Channels frequently have no username at all, only a title.
+      //  - Private channels have neither, leaving just the numeric id.
+      const collectNames = (peer: any): { handles: string[]; title?: string } => {
+        const handles: string[] = [];
+        if (peer.username) handles.push(peer.username);
+        for (const entry of peer.usernames ?? []) {
+          if (entry?.username) handles.push(entry.username);
         }
+        return { handles, title: peer.title ?? peer.firstName };
+      };
+
+      const names = new Map<string, { handles: string[]; title?: string }>();
+      for (const peer of [...users, ...chats]) {
+        names.set(peer.id.toString(), collectNames(peer));
       }
-      for (const chat of chats) {
-        if (chat.username) {
-          peerMap.set(chat.id.toString(), chat.username.toLowerCase());
-        }
-      }
 
-      const targetUsernames = usernames.map((u) => u.replace('@', '').toLowerCase());
+      const wanted = usernames.map((u) => u.replace(/^@/, '').toLowerCase());
 
-      // Filter stories from monitored peers
-      for (const story of stories) {
-        const peerId = story.peerId?.userId?.toString() || story.peerId?.chatId?.toString() || '';
-        const peerUsername = peerMap.get(peerId);
+      for (const entry of feed) {
+        const peerId = String(
+          entry.peer?.userId ?? entry.peer?.channelId ?? entry.peer?.chatId ?? ''
+        );
+        const info = names.get(peerId);
+        const label = info?.handles[0] ? `@${info.handles[0]}` : (info?.title ?? peerId);
 
-        if (!peerUsername || !targetUsernames.includes(peerUsername)) {
+        const matches = wanted.some(
+          (w) =>
+            w === peerId ||
+            w === info?.title?.toLowerCase() ||
+            (info?.handles ?? []).some((h) => h.toLowerCase() === w)
+        );
+
+        if (!matches) {
+          this.logger.debug('Skipping unmonitored peer', { peer: label, peerId });
           continue;
         }
 
-        try {
-          const media = await this.downloadStoryMedia(story, peerUsername);
-
-          if (media) {
-            results.push(media);
+        for (const story of entry.stories ?? []) {
+          try {
+            const media = await this.downloadStoryMedia(story, label, peerId);
+            if (media) results.push(media);
+          } catch (error) {
+            this.logger.error('Failed to download story media', {
+              storyId: story.id,
+              peer: label,
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
-        } catch (error) {
-          this.logger.error('Failed to download story media', {
-            storyId: story.id,
-            peer: peerUsername,
-            error: error instanceof Error ? error.message : String(error),
-          });
         }
       }
     } catch (error) {
@@ -144,15 +154,17 @@ export class TelegramStoryReader {
 
   private async downloadStoryMedia(
     story: any,
-    peerUsername: string
+    peerUsername: string,
+    peerId: string
   ): Promise<StoryMedia | null> {
     if (!this.client) return null;
 
-    // Determine story ID and media
-    const storyId = story.id?.toString() || createHash('md5')
-      .update(`${peerUsername}-${Date.now()}`)
-      .digest('hex')
-      .substring(0, 16);
+    // Story ids restart per peer — two channels can both have story 3 — and
+    // the state store dedupes on this value across every peer, so it has to
+    // be qualified or one of the two would silently never be posted.
+    const storyId = story.id
+      ? `${peerId}:${story.id}`
+      : `${peerId}:${createHash('md5').update(`${peerUsername}-${String(story.date)}`).digest('hex').substring(0, 16)}`;
 
     let mediaBuffer: Buffer | null = null;
     // Telegram carries the story's own text here; it used to be declared and

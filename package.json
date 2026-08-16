@@ -12,7 +12,8 @@
     "format": "prettier --write \"{src,test}/**/*.ts\"",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "login": "tsx scripts/telegram-login.ts"
+    "login": "tsx scripts/telegram-login.ts",
+    "inspect": "tsx scripts/telegram-inspect.ts"
   },
   "keywords": [
     "telegram",
