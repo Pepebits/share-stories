@@ -73,3 +73,18 @@ jobs:
           # built. Free, and most of what a hardened base image sells.
           sbom: true
           provenance: mode=max
+
+      # Keeps the Docker Hub overview in step with the repo instead of letting
+      # it rot. Tolerated on failure: the API needs a token with
+      # read/write/DELETE scope, and a read/write one is enough for pushing
+      # images — no reason to fail a good release over the description.
+      - name: Sync the Docker Hub overview
+        if: env.DOCKERHUB_USERNAME != ''
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/share-stories
+          short-description: 'Reposts Telegram stories to Instagram via the official Content Publishing API'
+          readme-filepath: ./docs/DOCKERHUB.md
