@@ -26,23 +26,35 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 
-FROM node:24-alpine
+# Bare Alpine plus the node binary, rather than the official node image.
+# That image also carries npm and corepack (~19MB) which nothing runs in
+# production, and deleting them in a later layer would not shrink anything —
+# they would still sit in the parent layer.
+FROM alpine:3.21
 
 LABEL org.opencontainers.image.title="share-historys" \
       org.opencontainers.image.description="Reposts Telegram stories to Instagram" \
       org.opencontainers.image.source="https://github.com/Pepebits/share-historys" \
       org.opencontainers.image.licenses="MIT"
 
+RUN apk add --no-cache libstdc++ \
+ && addgroup -g 1000 node \
+ && adduser -u 1000 -G node -s /bin/sh -D node
+
+COPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/node
+
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=deps  /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
+# --chown here rather than a later RUN chown: that would copy every file into
+# a second layer, doubling the weight of node_modules.
+COPY --from=deps  --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node package.json ./
 
 # Holds the Telegram session, the rotating Instagram token and the dedupe
 # database. Mount it: losing it means re-authenticating by hand.
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME ["/app/data"]
 
 USER node

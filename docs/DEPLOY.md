@@ -210,6 +210,61 @@ tunnel reaches it over the internal network as `bridge:8080`.
 
 ---
 
+## Publishing the image
+
+Tagging a release builds and pushes to GitHub Container Registry:
+
+```bash
+git tag v1.0.0
+git push --tags
+```
+
+`.github/workflows/publish.yml` publishes `ghcr.io/<owner>/share-historys` as
+`1.0.0`, `1.0` and `latest`.
+
+> **It builds for amd64 and arm64.** An image built only on an Apple Silicon
+> machine will not start on an x86 server, and the failure — `exec format
+> error` — says nothing useful. The arm64 half is emulated on an x64 runner, so
+> the job takes a while.
+
+### Pulling it
+
+The package inherits the repository's visibility. While the repo is private,
+anyone pulling needs to authenticate:
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
+docker pull ghcr.io/pepebits/share-historys:latest
+```
+
+The token needs `read:packages`. To let someone pull without one, make the
+package public: **Packages → share-historys → Package settings → Change
+visibility**. The image contains no credentials — `.env` and `data/` are
+excluded by `.dockerignore` — but it does disclose the source layout.
+
+Then point compose at the published image instead of building:
+
+```yaml
+services:
+  bridge:
+    image: ghcr.io/pepebits/share-historys:latest
+    # build: .        ← remove or comment out
+```
+
+### Publishing by hand
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/pepebits/share-historys:latest \
+  --push .
+```
+
+`docker build` alone produces a single-architecture image; `buildx` with
+`--platform` is what makes it portable.
+
+---
+
 ## Production without Docker (systemd)
 
 `share-historys.service` is included and already hardened: dedicated user,
