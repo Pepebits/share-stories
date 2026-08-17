@@ -6,8 +6,13 @@ on:
   pull_request:
     branches: [main]
 
-# The suite binds fixed ports (45790-45812). Two runs sharing this self-hosted
-# runner would collide on them, so only one is allowed in flight per ref.
+# GitHub-hosted, deliberately. This repository is public, so a pull request
+# from a fork runs whatever code it contains — and a self-hosted runner would
+# execute that on our own machine. Hosted runners are ephemeral and free for
+# public repositories.
+#
+# The suite binds fixed ports (45790-45812), so only one run per ref is
+# allowed in flight.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -17,9 +22,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: [self-hosted, Linux, X64]
-    # A hung job on a self-hosted runner blocks every later run, unlike a
-    # hosted runner that is torn down regardless.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -52,7 +55,7 @@ jobs:
         run: pnpm test
 
   audit:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -76,7 +79,7 @@ jobs:
   # Builds the runtime image and scans it. Kept out of `verify` so a new CVE
   # in a base layer is visibly a different failure from a broken test.
   scan:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
