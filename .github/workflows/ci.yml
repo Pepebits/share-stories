@@ -6,13 +6,17 @@ on:
   pull_request:
     branches: [main]
 
-# GitHub-hosted, deliberately. This repository is public, so a pull request
-# from a fork runs whatever code it contains — and a self-hosted runner would
-# execute that on our own machine. Hosted runners are ephemeral and free for
-# public repositories.
+# ⚠️ Runs on a self-hosted runner — our own VPS — which is only safe while
+# this repository is PRIVATE. Nobody outside can open a pull request, so no
+# untrusted code reaches the machine.
 #
-# The suite binds fixed ports (45790-45812), so only one run per ref is
-# allowed in flight.
+# If it is ever made public, move these jobs back to `ubuntu-latest` first.
+# A pull request from a fork executes whatever code it contains, and on a
+# self-hosted runner that means executing it on the VPS. Requiring approval
+# does not help: approving a malicious pull request runs it just the same.
+#
+# The suite binds fixed ports (45790-45812). Two runs sharing the runner
+# would collide on them, so only one is allowed in flight per ref.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -22,7 +26,9 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
+    # A hung job blocks every later run on a self-hosted runner, unlike a
+    # hosted one that is torn down regardless.
     timeout-minutes: 15
 
     steps:
@@ -55,7 +61,7 @@ jobs:
         run: pnpm test
 
   audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
 
     steps:
@@ -79,7 +85,7 @@ jobs:
   # Builds the runtime image and scans it. Kept out of `verify` so a new CVE
   # in a base layer is visibly a different failure from a broken test.
   scan:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
 
     steps:
