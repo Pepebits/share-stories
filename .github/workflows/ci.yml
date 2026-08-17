@@ -72,3 +72,33 @@ jobs:
       # distinct from a genuine test failure.
       - name: Audit runtime dependencies
         run: pnpm audit --prod
+
+  # Builds the runtime image and scans it. Kept out of `verify` so a new CVE
+  # in a base layer is visibly a different failure from a broken test.
+  scan:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: share-historys:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: share-historys:scan
+          severity: HIGH,CRITICAL
+          # Nothing can be done about a vulnerability with no fix available,
+          # so failing on one would only train people to ignore this job.
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
