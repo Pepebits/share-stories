@@ -53,3 +53,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # A bill of materials and a signed record of how the image was
+          # built. Free, and most of what a hardened base image sells.
+          sbom: true
+          provenance: mode=max
