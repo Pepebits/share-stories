@@ -82,10 +82,10 @@ removed implementation.
 
 ## Tech stack
 
-- **Runtime** Node.js 22+ (ESM) · **Language** TypeScript 5.9 · **Packages** pnpm 10
+- **Runtime** Node.js 24.19+ (ESM) · **Language** TypeScript 5.9 · **Packages** pnpm 10
 - **Telegram** GramJS (MTProto) — the Bot API cannot see stories
 - **Instagram** Content Publishing API, `graph.instagram.com` v26.0
-- **State** SQLite (`better-sqlite3`) · **Logs** Winston
+- **State** SQLite via Node's built-in `node:sqlite` — no native module · **Logs** Winston
 
 ## How it works
 
