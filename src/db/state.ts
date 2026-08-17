@@ -4,7 +4,7 @@ import { dirname } from 'path';
 
 export type Platform = 'telegram' | 'instagram';
 
-export type StoryStatus = 'new' | 'processing' | 'posted' | 'failed';
+export type StoryStatus = 'processing' | 'posted' | 'failed';
 
 export interface StoredStory {
   id: number;
@@ -18,8 +18,14 @@ export interface StoredStory {
   error_message: string | null;
 }
 
+/**
+ * Remembers which stories have already been bridged.
+ *
+ * A story stays visible for 24h, so a two-minute poll sees the same one some
+ * 700 times. Everything here exists to make sure it is published exactly once.
+ */
 export class StateStore {
-  private db: Database.Database;
+  private readonly db: Database.Database;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
@@ -41,7 +47,7 @@ export class StateStore {
         story_id TEXT NOT NULL,
         source_user TEXT NOT NULL,
         target_platform TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'new',
+        status TEXT NOT NULL DEFAULT 'processing',
         processed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         error_message TEXT,
@@ -56,15 +62,22 @@ export class StateStore {
     `);
   }
 
+  /**
+   * True once a story is published or currently being published.
+   *
+   * 'failed' is deliberately absent: a transient rejection should be retried
+   * on the next cycle rather than written off.
+   */
   isProcessed(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): boolean {
     const row = this.db
       .prepare(
         `SELECT 1 FROM stories
          WHERE story_id = ? AND platform = ? AND target_platform = ?
-         AND status IN ('posted', 'processing')
+           AND status IN ('posted', 'processing')
          LIMIT 1`
       )
       .get(storyId, sourcePlatform, targetPlatform);
+
     return row !== undefined;
   }
 
@@ -74,7 +87,7 @@ export class StateStore {
     sourceUser: string,
     targetPlatform: Platform
   ): void {
-    // A retry of a previously failed story must move back to 'processing';
+    // Retrying a previously failed story has to move it back to 'processing';
     // INSERT OR IGNORE would leave it marked 'failed' for the whole attempt,
     // so isProcessed() would not protect it.
     this.db
@@ -90,7 +103,7 @@ export class StateStore {
   markPosted(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): void {
     this.db
       .prepare(
-        `UPDATE stories SET status = 'posted', processed_at = datetime('now')
+        `UPDATE stories SET status = 'posted', processed_at = datetime('now'), error_message = NULL
          WHERE story_id = ? AND platform = ? AND target_platform = ?`
       )
       .run(storyId, sourcePlatform, targetPlatform);
@@ -110,27 +123,37 @@ export class StateStore {
       .run(errorMessage, storyId, sourcePlatform, targetPlatform);
   }
 
-  getRecentStories(limit: number = 50): StoredStory[] {
+  /**
+   * Clears rows left mid-publish by a crash or a kill.
+   *
+   * 'processing' is set before the upload starts, and publishing a video can
+   * take a minute. If the process dies in that window the row keeps blocking
+   * isProcessed() forever, and that story is never retried. Only one process
+   * owns this database, so nothing can legitimately be in flight at startup.
+   *
+   * Returns how many rows were recovered.
+   */
+  recoverStalled(): number {
     return this.db
-      .prepare(`SELECT * FROM stories ORDER BY created_at DESC LIMIT ?`)
-      .all(limit) as StoredStory[];
+      .prepare(
+        `UPDATE stories SET status = 'failed', error_message = ?
+         WHERE status = 'processing'`
+      )
+      .run('Interrupted before it finished; will be retried').changes;
   }
 
-  getFailedStories(): StoredStory[] {
-    return this.db
-      .prepare(`SELECT * FROM stories WHERE status = 'failed' ORDER BY created_at DESC`)
-      .all() as StoredStory[];
-  }
-
+  /**
+   * Drops rows that are past being useful. Story ids are never reused — they
+   * expire after 24h — so old rows only cost space.
+   */
   cleanup(daysOld: number = 30): number {
-    const result = this.db
+    return this.db
       .prepare(
         `DELETE FROM stories
          WHERE created_at < datetime('now', '-' || ? || ' days')
-         AND status IN ('posted', 'failed')`
+           AND status IN ('posted', 'failed')`
       )
-      .run(daysOld);
-    return result.changes;
+      .run(daysOld).changes;
   }
 
   close(): void {
