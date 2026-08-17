@@ -1,4 +1,4 @@
-# Share Historys
+# Share Stories
 
 Reposts stories from monitored Telegram peers to Instagram, using Instagram's
 official Content Publishing API.
@@ -56,9 +56,17 @@ pnpm run inspect           # shows which peers have stories, and how to name the
 pnpm start
 ```
 
-You also need a public HTTPS URL for `PUBLIC_BASE_URL` — Meta downloads the
-media from it. [docs/DEPLOY.md](docs/DEPLOY.md) covers both a throwaway tunnel
-for testing and a stable one for production.
+Or with Docker, once `.env` is filled in and Telegram is authenticated:
+
+```bash
+docker compose --profile tunnel up -d      # with a Cloudflare tunnel
+docker compose up -d                       # behind your own Caddy/nginx
+```
+
+Either way you need a public HTTPS URL in `PUBLIC_BASE_URL` — Meta downloads
+the media from it, so it must be the address *Meta* resolves, never the
+container's own port. [docs/DEPLOY.md](docs/DEPLOY.md) covers a throwaway
+tunnel for testing, a stable one for production, and publishing the image.
 
 ## Why only one direction
 
@@ -82,7 +90,7 @@ removed implementation.
 
 ## Tech stack
 
-- **Runtime** Node.js 24.19+ (ESM) · **Language** TypeScript 5.9 · **Packages** pnpm 10
+- **Runtime** Node.js 24.19+ (ESM) · **Language** TypeScript 5.9 · **Packages** pnpm 11
 - **Telegram** GramJS (MTProto) — the Bot API cannot see stories
 - **Instagram** Content Publishing API, `graph.instagram.com` v26.0
 - **State** SQLite via Node's built-in `node:sqlite` — no native module · **Logs** Winston
@@ -140,11 +148,11 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
   image --severity HIGH,CRITICAL --ignore-unfixed share-stories:scan
 ```
 
-89 tests. `graph.instagram.com` and `api.telegram.org` are stubbed locally, so
-the publish handshake is exercised end to end: container creation, status
-polling, `ERROR`/`EXPIRED` containers, a rejected token aborting without
-retries, 5xx and 429 retrying, and the media URL being revoked on both success
-and failure.
+93 tests, no credentials or network needed: `graph.instagram.com` is stubbed
+by a local server, so the publish handshake runs end to end — container
+creation, status polling, `ERROR`/`EXPIRED` containers, a rejected token
+aborting without retries, 5xx and 429 retrying, and the media URL being
+revoked on both success and failure.
 
 **Not covered**: `telegram/reader.ts` (GramJS) and the startup path in
 `index.ts`. Whether Meta accepts a given video, and whether it can reach
@@ -153,10 +161,11 @@ and failure.
 ## Limitations
 
 - **Captions are dropped**: Instagram stories do not render the caption field.
-- **20MB ceiling** applies to the channel source (a Bot API limit), not to GramJS.
 - **Media requirements**: Meta validates format server-side and a rejected file
   surfaces as a container `ERROR` with little detail.
 - **No alerting**: if the bridge stops publishing, only the logs will say so.
+- **One account per install**: there is no multi-tenancy, by design — see
+  *Before you share this*.
 
 ## License
 
