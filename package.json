@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write \"{src,test}/**/*.ts\"",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm test && pnpm audit --prod",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "login": "tsx scripts/telegram-login.ts",
     "inspect": "tsx scripts/telegram-inspect.ts"

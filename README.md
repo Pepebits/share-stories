@@ -128,9 +128,16 @@ it pauses the cycle rather than failing the story.
 ## Tests
 
 ```bash
-pnpm test          # node:test via tsx — no credentials or network needed
-pnpm run typecheck
-pnpm run lint
+pnpm run verify    # everything CI runs: lint, typecheck, build, tests, audit
+pnpm test          # just the tests — no credentials or network needed
+```
+
+The image scan CI also performs, run locally:
+
+```bash
+docker build -t share-historys:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
+  image --severity HIGH,CRITICAL --ignore-unfixed share-historys:scan
 ```
 
 89 tests. `graph.instagram.com` and `api.telegram.org` are stubbed locally, so
