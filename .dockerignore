@@ -1,0 +1,15 @@
+# Secrets — must never reach an image layer
+.env
+data/
+*.session
+
+node_modules/
+dist/
+.git/
+.github/
+.claude/
+test/
+scripts/
+coverage/
+*.log
+.DS_Store
