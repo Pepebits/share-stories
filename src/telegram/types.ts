@@ -1,31 +1,12 @@
+/** A story downloaded from the source, ready to be published. */
 export interface StoryMedia {
+  /** Unique across peers: story ids restart per peer. */
   id: string;
   sourceUser: string;
   sourcePlatform: 'telegram' | 'instagram';
   mediaType: 'photo' | 'video';
   buffer: Buffer;
   caption?: string;
+  /** Epoch milliseconds. */
   timestamp: number;
-  duration?: number;
-  width?: number;
-  height?: number;
-}
-
-export interface TelegramPeer {
-  username: string;
-  accessHash?: string;
-}
-
-export interface InstagramUser {
-  username: string;
-  pk?: string | number;
-}
-
-export interface BridgeResult {
-  success: boolean;
-  storyId: string;
-  sourcePlatform: 'telegram' | 'instagram';
-  targetPlatform: 'telegram' | 'instagram';
-  targetStoryId?: string;
-  error?: string;
 }
