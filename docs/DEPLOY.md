@@ -251,6 +251,38 @@ services:
     # build: .        ← remove or comment out
 ```
 
+### Also publishing to Docker Hub
+
+Optional, and off unless you configure it. Add two repository secrets —
+**Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | A personal access token, **not** your password |
+
+Create the token at **Docker Hub → Account settings → Personal access tokens**
+with *Read & Write*, scoped to this repository if the plan allows it. With
+both secrets present the workflow pushes to Docker Hub as well; without them
+those steps are skipped and nothing changes.
+
+> **Put the token in GitHub, not on your laptop.** Repository secrets are
+> encrypted at rest, masked if something echoes them, and never exposed to
+> pull requests from forks. A token on a developer machine ends up in shell
+> history, in `~/.docker/config.json`, and in whatever backs that machine up.
+> It also means CI does the multi-architecture build, which is far quicker
+> than emulating amd64 on an Apple Silicon laptop.
+>
+> One caveat specific to this setup: the runner is **self-hosted**, so secrets
+> are decrypted onto that machine while a job runs. Anyone with access to it
+> can read them. That is acceptable for a private repository you control; it
+> would not be for a public one, where a fork could run code on your runner.
+
+> **Docker Hub's free plan is public.** Anyone can pull the image. It carries
+> no credentials — `.dockerignore` excludes `.env` and `data/` — but it does
+> disclose the source. ghcr.io inherits the repository's visibility instead,
+> which is why it is the default here.
+
 ### Publishing by hand
 
 ```bash
