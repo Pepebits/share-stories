@@ -23,21 +23,9 @@
     "cross-posting"
   ],
   "license": "MIT",
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621",
   "engines": {
     "node": ">=24.19"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "unrs-resolver"
-    ],
-    "overrides": {
-      "ip-address@<10.2.1": ">=10.2.1",
-      "js-yaml@^4.0.0": "^4.3.1",
-      "brace-expansion@^1.0.0": "^1.1.18",
-      "brace-expansion@^5.0.0": "^5.0.9"
-    }
   },
   "dependencies": {
     "axios": "^1.7.9",

@@ -1,0 +1,36 @@
+# pnpm 11 reads its settings from here. .npmrc is limited to auth and registry
+# configuration, so anything left there would be ignored without warning.
+
+# Refuse packages published less than 7 days ago. pnpm 11 enables this by
+# default at 1 day; a week is a wider net for the case this guards against —
+# a compromised version published and pulled within hours.
+minimumReleaseAge: 10080
+
+# Strict node_modules: a transitive dependency cannot be imported unless it is
+# declared in package.json.
+hoist: false
+
+# Verify the content-addressable store on every install.
+verifyStoreIntegrity: true
+
+# Only these may run install scripts. Everything else is blocked, so a
+# postinstall in some transitive dependency cannot execute during CI.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  # Denied on purpose. bufferutil and utf-8-validate are optional native
+  # speedups for ws, which falls back to its JS implementation without them;
+  # es5-ext's postinstall only prints a funding notice.
+  bufferutil: false
+  utf-8-validate: false
+  es5-ext: false
+
+# Transitive advisories Dependabot could not resolve on its own: the fixed
+# versions exist but sit behind eslint's dependency tree. Pinned with caret
+# ranges inside each existing major — a bare >= pulled js-yaml across to 5.x,
+# a major bump for a dependency nobody asked to upgrade.
+overrides:
+  'ip-address@<10.2.1': '>=10.2.1'
+  'js-yaml@^4.0.0': '^4.3.1'
+  'brace-expansion@^1.0.0': '^1.1.18'
+  'brace-expansion@^5.0.0': '^5.0.9'
