@@ -5,13 +5,13 @@ you serve, which means this process must be reachable from the public internet
 on HTTPS. That single requirement shapes everything below.
 
 ```
-   Telegram ──▶ bridge ──▶ media server :8080 ──▶ Cloudflare tunnel ──▶ Meta
-                                                   (public HTTPS)
+   Telegram ──▶ bridge ──▶ media server :8080 ──▶ tunnel or reverse proxy ──▶ Meta
+                                                        (public HTTPS)
 ```
 
 The media server hands out single-use, 256-bit URLs that are revoked the moment
-Meta has fetched them. It still must never be exposed directly — put the tunnel
-in front of it and keep the port off the host.
+Meta has fetched them. It still must never face the internet directly: put a
+Cloudflare tunnel or your own proxy in front, and keep the port itself private.
 
 ---
 
@@ -83,7 +83,68 @@ pnpm start
 
 ---
 
-## Production with Docker
+## How the public URL reaches the bridge
+
+The bridge never discovers its own hostname. You tell it, through one variable:
+
+```bash
+PUBLIC_BASE_URL=https://stories.example.com
+```
+
+That is the address it stamps into the URLs it hands Meta, so it must be the
+address **Meta** resolves — the proxy or tunnel in front, never the container's
+own port. Startup refuses a loopback or private address rather than letting
+every publish fail with an opaque container `ERROR`.
+
+Two ways to provide it, both supported by the same compose file:
+
+| | Command | When |
+|---|---|---|
+| Cloudflare tunnel | `docker compose --profile tunnel up -d` | No public IP, no certificate to manage |
+| Your own proxy | `docker compose up -d` | You already run Caddy, nginx or Traefik |
+
+### With your own reverse proxy
+
+The bridge publishes `8080` on **loopback only** by default, so a proxy on the
+same host can reach it and the internet cannot. Adjust with `BRIDGE_PORT`, or
+`BRIDGE_BIND` if the proxy lives elsewhere.
+
+Caddy needs two lines:
+
+```caddyfile
+stories.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+nginx, equivalently:
+
+```nginx
+server {
+    server_name stories.example.com;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+Then set `PUBLIC_BASE_URL=https://stories.example.com` and start with plain
+`docker compose up -d` — the tunnel container stays out of it.
+
+> **Do not expose port 8080 itself.** It serves story media at unauthenticated
+> URLs. They are single-use and revoked as soon as Meta fetches them, but the
+> port belongs behind TLS either way.
+
+If your proxy runs in Docker too, drop the `ports:` block and put both on the
+same network instead; the proxy then reaches the bridge as `bridge:8080`.
+
+### Health endpoint
+
+`GET /health` returns `200 ok` and discloses nothing else. Use it for proxy
+health checks; the container already uses it for its own `HEALTHCHECK`.
+
+## Production with the Cloudflare tunnel
 
 Two containers: the bridge, and a **named** tunnel whose hostname survives
 restarts.
@@ -127,16 +188,22 @@ into the container.
 **4. Start**
 
 ```bash
-docker compose up -d --build
+docker compose --profile tunnel up -d --build
 docker compose logs -f bridge
 ```
 
+With this profile the bridge does not need its port on the host at all — the
+tunnel reaches it over the internal network as `bridge:8080`.
+
 ### Notes on the compose file
 
-- **Port 8080 is not published to the host.** It is on the internal network
-  only, reachable by the tunnel. Publishing it would expose story media.
+- **Port 8080 is published to loopback only** (`127.0.0.1:8080`), so a proxy on
+  the same host can reach it and the internet cannot. Change it with
+  `BRIDGE_PORT` / `BRIDGE_BIND`, or delete the block when using the tunnel.
 - `MEDIA_SERVER_HOST` is forced to `0.0.0.0`: the default loopback bind is
   unreachable from a different container.
+- The container runs **read-only**, as a non-root user, with all capabilities
+  dropped. Only the mounted `./data` is writable.
 - `./data` is a bind mount and holds the Telegram session, the rotating
   Instagram token and the dedupe database. **Back it up.** Losing it means
   re-authenticating and re-posting every story still active.
