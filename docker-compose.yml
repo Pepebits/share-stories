@@ -1,0 +1,35 @@
+# Production layout: the bridge plus a Cloudflare tunnel that gives Meta a
+# stable HTTPS hostname to fetch story media from.
+#
+# The media port is deliberately not published to the host. It is reachable
+# only on the internal network, and only the tunnel talks to it.
+
+services:
+  bridge:
+    build: .
+    image: share-historys
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Must bind all interfaces: the tunnel is a different container, so
+      # loopback would be unreachable from it.
+      MEDIA_SERVER_HOST: 0.0.0.0
+      MEDIA_SERVER_PORT: 8080
+      # Set this to the hostname routed to the tunnel, e.g.
+      # https://stories.example.com
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to your tunnel hostname}
+    volumes:
+      # Holds the Telegram session, the rotating Instagram token and the
+      # dedupe database. Losing it means re-authenticating by hand.
+      - ./data:/app/data
+    expose:
+      - '8080'
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # A named tunnel: the token carries its identity and routing, so the
+    # hostname stays the same across restarts — unlike a quick tunnel.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - bridge
