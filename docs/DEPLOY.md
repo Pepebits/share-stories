@@ -19,7 +19,7 @@ Cloudflare tunnel or your own proxy in front, and keep the port itself private.
 
 | | |
 |---|---|
-| Node.js | 22+ (only for running without Docker) |
+| Node.js | **24.19+** — SQLite is built in from that version, so there is no native module to compile |
 | Instagram | Business or Creator account + a Meta app — see [INSTAGRAM_SETUP.md](INSTAGRAM_SETUP.md) |
 | Telegram | `api_id` / `api_hash` from [my.telegram.org](https://my.telegram.org/apps), and the account's phone |
 | Public HTTPS | A Cloudflare tunnel, or any reverse proxy with a real certificate |

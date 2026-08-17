@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
-import { mkdirSync, existsSync } from 'fs';
-import { dirname } from 'path';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export type Platform = 'telegram' | 'instagram';
 
@@ -23,9 +23,13 @@ export interface StoredStory {
  *
  * A story stays visible for 24h, so a two-minute poll sees the same one some
  * 700 times. Everything here exists to make sure it is published exactly once.
+ *
+ * Uses Node's built-in SQLite rather than a native module: better-sqlite3 has
+ * to be compiled whenever no prebuild matches the running ABI, which turns
+ * every Node upgrade into a build problem.
  */
 export class StateStore {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
@@ -33,9 +37,9 @@ export class StateStore {
       mkdirSync(dir, { recursive: true });
     }
 
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('busy_timeout = 5000');
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.init();
   }
 
@@ -139,7 +143,7 @@ export class StateStore {
         `UPDATE stories SET status = 'failed', error_message = ?
          WHERE status = 'processing'`
       )
-      .run('Interrupted before it finished; will be retried').changes;
+      .run('Interrupted before it finished; will be retried').changes as number;
   }
 
   /**
@@ -153,7 +157,7 @@ export class StateStore {
          WHERE created_at < datetime('now', '-' || ? || ' days')
            AND status IN ('posted', 'failed')`
       )
-      .run(daysOld).changes;
+      .run(daysOld).changes as number;
   }
 
   close(): void {

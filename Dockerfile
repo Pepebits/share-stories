@@ -1,7 +1,9 @@
-# Alpine keeps the runtime ~120MB smaller than -slim. The cost is that
-# better-sqlite3 has no musl prebuild and must be compiled, so the toolchain
-# lives in a build stage and never reaches the final image.
-FROM node:22-alpine AS build
+# Node 24 is the current LTS (supported to April 2028); 22 drops out of
+# maintenance in April 2027.
+#
+# SQLite is built into Node from 24.19, so this carries no native module —
+# nothing to compile, and no toolchain in any stage.
+FROM node:24-alpine AS build
 
 WORKDIR /app
 RUN corepack enable
@@ -15,18 +17,16 @@ COPY src ./src
 RUN pnpm run build
 
 
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 
 WORKDIR /app
-RUN corepack enable && apk add --no-cache python3 make g++
+RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./
-# Production only. The native binding is compiled here against the same base
-# image the runtime uses, so the ABI and libc match.
 RUN pnpm install --frozen-lockfile --prod
 
 
-FROM node:22-alpine
+FROM node:24-alpine
 
 LABEL org.opencontainers.image.title="share-historys" \
       org.opencontainers.image.description="Reposts Telegram stories to Instagram" \
