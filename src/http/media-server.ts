@@ -132,7 +132,18 @@ export class MediaServer {
       return;
     }
 
-    const match = TOKEN_PATTERN.exec(req.url ?? '');
+    const path = (req.url ?? '').split('?')[0];
+
+    // Liveness only. Deliberately says nothing about stories, tokens or how
+    // many items are hosted: whatever fronts this can be probed by anyone who
+    // reaches it.
+    if (path === '/health') {
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+      res.end(req.method === 'HEAD' ? undefined : 'ok');
+      return;
+    }
+
+    const match = TOKEN_PATTERN.exec(path);
     const item = match ? this.items.get(match[1]) : undefined;
 
     // Unknown, malformed, and expired tokens are indistinguishable from outside.

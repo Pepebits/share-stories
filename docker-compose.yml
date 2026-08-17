@@ -1,35 +1,64 @@
-# Production layout: the bridge plus a Cloudflare tunnel that gives Meta a
-# stable HTTPS hostname to fetch story media from.
+# Meta fetches story media over HTTPS, so this process needs a public origin.
+# How you provide it is up to you — the bridge only ever needs to be told the
+# resulting hostname, through PUBLIC_BASE_URL.
 #
-# The media port is deliberately not published to the host. It is reachable
-# only on the internal network, and only the tunnel talks to it.
+#   Cloudflare tunnel   docker compose --profile tunnel up -d
+#   Your own proxy      docker compose up -d       (see BRIDGE_PORT below)
+#
+# Both modes read the same .env.
 
 services:
   bridge:
     build: .
     image: share-historys
     restart: unless-stopped
+    # Reaps zombies and forwards signals, so `docker stop` shuts down cleanly
+    # instead of waiting out the timeout.
+    init: true
     env_file: .env
     environment:
-      # Must bind all interfaces: the tunnel is a different container, so
-      # loopback would be unreachable from it.
+      # Must bind all interfaces: loopback is unreachable from another
+      # container or from the host.
       MEDIA_SERVER_HOST: 0.0.0.0
       MEDIA_SERVER_PORT: 8080
-      # Set this to the hostname routed to the tunnel, e.g.
-      # https://stories.example.com
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to your tunnel hostname}
+      # The hostname your proxy or tunnel serves, e.g. https://stories.example.com
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the public hostname}
     volumes:
-      # Holds the Telegram session, the rotating Instagram token and the
-      # dedupe database. Losing it means re-authenticating by hand.
+      # Telegram session, rotating Instagram token, dedupe database. Back it up.
       - ./data:/app/data
-    expose:
-      - '8080'
+    ports:
+      # Bound to loopback by default, so an external proxy on this host can
+      # reach it while the internet cannot. Set BRIDGE_PORT to move it, or
+      # drop this block entirely when using the tunnel profile.
+      - '${BRIDGE_BIND:-127.0.0.1}:${BRIDGE_PORT:-8080}:8080'
 
+    # Nothing is written outside the data volume.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Optional. Only starts with --profile tunnel.
   tunnel:
+    profiles: ['tunnel']
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     # A named tunnel: the token carries its identity and routing, so the
-    # hostname stays the same across restarts — unlike a quick tunnel.
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    # hostname survives restarts — unlike a quick tunnel.
+    #
+    # Defaulted rather than required, because compose interpolates every
+    # service before it filters by profile: demanding it here would force a
+    # Cloudflare token on people who front this with their own proxy.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      - bridge
+      bridge:
+        condition: service_healthy

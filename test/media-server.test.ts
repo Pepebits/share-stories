@@ -126,6 +126,34 @@ describe('MediaServer', () => {
     });
   });
 
+  describe('health endpoint', () => {
+    it('answers without any credential', async () => {
+      const response = await fetch(`${ORIGIN}/health`);
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'ok');
+    });
+
+    it('answers HEAD too, for probes that use it', async () => {
+      assert.equal((await fetch(`${ORIGIN}/health`, { method: 'HEAD' })).status, 200);
+    });
+
+    // It is reachable by anyone who can reach the proxy, so it must not
+    // become an inventory of what is currently hosted.
+    it('discloses nothing about hosted media', async () => {
+      const { url, release } = server.host(payload, 'video');
+      const body = await (await fetch(`${ORIGIN}/health`)).text();
+
+      assert.equal(body.includes(url.split('/media/')[1]), false);
+      assert.equal(body, 'ok');
+      release();
+    });
+
+    it('is not confused by a query string', async () => {
+      assert.equal((await fetch(`${ORIGIN}/health?probe=1`)).status, 200);
+    });
+  });
+
   describe('isolation', () => {
     it('404s an unknown token', async () => {
       const { url, release } = server.host(payload, 'video');
