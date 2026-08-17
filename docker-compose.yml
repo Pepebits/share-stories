@@ -10,7 +10,7 @@
 services:
   bridge:
     build: .
-    image: share-historys
+    image: share-stories
     restart: unless-stopped
     # Reaps zombies and forwards signals, so `docker stop` shuts down cleanly
     # instead of waiting out the timeout.
