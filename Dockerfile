@@ -34,9 +34,9 @@ RUN pnpm install --frozen-lockfile --prod
 # they would still sit in the parent layer.
 FROM alpine:3.21
 
-LABEL org.opencontainers.image.title="share-historys" \
+LABEL org.opencontainers.image.title="share-stories" \
       org.opencontainers.image.description="Reposts Telegram stories to Instagram" \
-      org.opencontainers.image.source="https://github.com/Pepebits/share-historys" \
+      org.opencontainers.image.source="https://github.com/Pepebits/share-stories" \
       org.opencontainers.image.licenses="MIT"
 
 RUN apk add --no-cache libstdc++ \

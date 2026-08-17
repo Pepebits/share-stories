@@ -135,9 +135,9 @@ pnpm test          # just the tests — no credentials or network needed
 The image scan CI also performs, run locally:
 
 ```bash
-docker build -t share-historys:scan .
+docker build -t share-stories:scan .
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
-  image --severity HIGH,CRITICAL --ignore-unfixed share-historys:scan
+  image --severity HIGH,CRITICAL --ignore-unfixed share-stories:scan
 ```
 
 89 tests. `graph.instagram.com` and `api.telegram.org` are stubbed locally, so

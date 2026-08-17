@@ -219,7 +219,7 @@ git tag v1.0.0
 git push --tags
 ```
 
-`.github/workflows/publish.yml` publishes `ghcr.io/<owner>/share-historys` as
+`.github/workflows/publish.yml` publishes `ghcr.io/<owner>/share-stories` as
 `1.0.0`, `1.0` and `latest`.
 
 > **It builds for amd64 and arm64.** An image built only on an Apple Silicon
@@ -234,11 +234,11 @@ anyone pulling needs to authenticate:
 
 ```bash
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
-docker pull ghcr.io/pepebits/share-historys:latest
+docker pull ghcr.io/pepebits/share-stories:latest
 ```
 
 The token needs `read:packages`. To let someone pull without one, make the
-package public: **Packages → share-historys → Package settings → Change
+package public: **Packages → share-stories → Package settings → Change
 visibility**. The image contains no credentials — `.env` and `data/` are
 excluded by `.dockerignore` — but it does disclose the source layout.
 
@@ -247,7 +247,7 @@ Then point compose at the published image instead of building:
 ```yaml
 services:
   bridge:
-    image: ghcr.io/pepebits/share-historys:latest
+    image: ghcr.io/pepebits/share-stories:latest
     # build: .        ← remove or comment out
 ```
 
@@ -256,7 +256,7 @@ services:
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/pepebits/share-historys:latest \
+  -t ghcr.io/pepebits/share-stories:latest \
   --push .
 ```
 
@@ -267,15 +267,15 @@ docker buildx build \
 
 ## Production without Docker (systemd)
 
-`share-historys.service` is included and already hardened: dedicated user,
+`share-stories.service` is included and already hardened: dedicated user,
 `ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges`.
 
 ```bash
-sudo useradd -r -s /bin/false share-historys
-sudo cp -r dist node_modules package.json .env /opt/share-historys/
-sudo chown -R share-historys:share-historys /opt/share-historys
-sudo cp share-historys.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now share-historys
+sudo useradd -r -s /bin/false share-stories
+sudo cp -r dist node_modules package.json .env /opt/share-stories/
+sudo chown -R share-stories:share-stories /opt/share-stories
+sudo cp share-stories.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now share-stories
 ```
 
 You still need a public HTTPS origin in front of `MEDIA_SERVER_PORT` — either
@@ -286,7 +286,7 @@ cloudflared as a service, or nginx/Caddy terminating TLS.
 ## Operating it
 
 **Logs.** Everything goes to stdout (`docker compose logs`, `journalctl -u
-share-historys`). Nothing else reports failures: if the bridge stops
+share-stories`). Nothing else reports failures: if the bridge stops
 publishing, only the log will say so.
 
 **Backups.** `./data` is the only stateful thing. Both credential files are

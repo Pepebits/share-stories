@@ -88,14 +88,14 @@ jobs:
         with:
           context: .
           load: true
-          tags: share-historys:scan
+          tags: share-stories:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan for known vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: share-historys:scan
+          image-ref: share-stories:scan
           severity: HIGH,CRITICAL
           # Nothing can be done about a vulnerability with no fix available,
           # so failing on one would only train people to ignore this job.

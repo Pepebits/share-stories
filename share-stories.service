@@ -5,26 +5,26 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=share-historys
-WorkingDirectory=/opt/share-historys
+User=share-stories
+WorkingDirectory=/opt/share-stories
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=share-historys
+SyslogIdentifier=share-stories
 
 # Security hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/share-historys/data
-ReadOnlyPaths=/opt/share-historys/.env
+ReadWritePaths=/opt/share-stories/data
+ReadOnlyPaths=/opt/share-stories/.env
 
 # Environment
 Environment=NODE_ENV=production
-EnvironmentFile=/opt/share-historys/.env
+EnvironmentFile=/opt/share-stories/.env
 
 [Install]
 WantedBy=multi-user.target
