@@ -19,6 +19,14 @@ official Content Publishing API.
 - **[docs/INSTAGRAM_SETUP.md](docs/INSTAGRAM_SETUP.md)** — getting the Meta app and token
 - **[docs/DEPLOY.md](docs/DEPLOY.md)** — running it locally, or in production with Docker
 
+**Published image:** [`pepebits/share-stories`](https://hub.docker.com/r/pepebits/share-stories)
+on Docker Hub, and `ghcr.io/Pepebits/share-stories` on GitHub Container
+Registry. Both multi-architecture (`amd64`, `arm64`).
+
+```bash
+docker pull pepebits/share-stories
+```
+
 ---
 
 ## Before you share this with anyone
