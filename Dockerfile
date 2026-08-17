@@ -8,8 +8,10 @@ FROM node:24-alpine AS build
 WORKDIR /app
 RUN corepack enable
 
-# Copied first so the dependency layer survives source-only changes.
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries the overrides and build policy from pnpm 11 on;
+# without it the lockfile's recorded config does not match and a frozen
+# install refuses to proceed.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json ./
@@ -22,7 +24,7 @@ FROM node:24-alpine AS deps
 WORKDIR /app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 
