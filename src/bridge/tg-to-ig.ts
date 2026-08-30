@@ -36,6 +36,14 @@ export function createTgToIgBridge(
   // next tick would re-read the same stories and double-post them.
   let polling = false;
 
+  /**
+   * Whether a story is worth spending anything on right now — never published,
+   * and not a failure that is waiting out its backoff or has been written off.
+   */
+  const worthAttempting = (storyId: string): boolean =>
+    !store.isProcessed(storyId, 'telegram', 'instagram') &&
+    store.retryState(storyId, 'telegram', 'instagram') === 'ready';
+
   const publish = async (story: Awaited<ReturnType<typeof reader.getStoriesForPeers>>[number]) => {
     store.markProcessing(story.id, 'telegram', story.sourceUser, 'instagram');
 
@@ -74,20 +82,16 @@ export function createTgToIgBridge(
     polling = true;
 
     try {
-      const stories = await reader.getStoriesForPeers(config.monitoredPeers);
+      // The reader downloads whatever it returns, so the "have we settled this
+      // already?" question has to be answered before it fetches, not after.
+      const stories = await reader.getStoriesForPeers(config.monitoredPeers, worthAttempting);
 
       for (const story of stories) {
         if (!running) break;
-        if (store.isProcessed(story.id, 'telegram', 'instagram')) continue;
 
-        // A failed story is worth another go, but not on every cycle and not
-        // forever: without this a story that cannot succeed is retried until
-        // it expires, at three requests to Meta a time.
-        const retry = store.retryState(story.id, 'telegram', 'instagram');
-        if (retry !== 'ready') {
-          logger.debug('Holding off on a failed story', { storyId: story.id, retry });
-          continue;
-        }
+        // Asked again because the whole batch is downloaded before any of it
+        // is published, and publishing a video can outlast a poll interval.
+        if (!worthAttempting(story.id)) continue;
 
         try {
           // Checked before the story is touched: exceeding the quota is a
