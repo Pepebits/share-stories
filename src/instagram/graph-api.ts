@@ -4,6 +4,7 @@ import { StoryMedia } from '../telegram/types.js';
 import { InstagramPublishConfig, PublishTiming } from './types.js';
 import { MediaServer } from '../http/media-server.js';
 import { withRetry } from '../utils/retry.js';
+import { rejectionReason } from './limits.js';
 
 /**
  * Official Instagram Content Publishing — "Instagram API with Instagram Login".
@@ -163,13 +164,17 @@ async function waitForContainer(
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     let status: ContainerStatus;
+    // `status` carries Meta's own sentence about what went wrong; status_code
+    // alone only ever says ERROR, which is what made these failures guesswork.
+    let detail: string | undefined;
     try {
       const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
-        params: { fields: 'status_code' },
+        params: { fields: 'status_code,status' },
         headers: authHeaders(config),
         timeout: 15_000,
       });
       status = response.data?.status_code;
+      detail = response.data?.status;
     } catch (error) {
       if (isPermanent(error)) {
         throw new PermanentError(describeError(error));
@@ -190,7 +195,9 @@ async function waitForContainer(
     if (status === 'ERROR' || status === 'EXPIRED') {
       throw new PermanentError(
         `Container ${containerId} ended in status ${status}. ` +
-          "Usually the media failed Meta's format checks, or PUBLIC_BASE_URL was unreachable."
+          (detail
+            ? `Meta says: ${detail}`
+            : "Meta gave no reason. Usually the media failed its format checks, or PUBLIC_BASE_URL was unreachable.")
       );
     }
 
@@ -251,14 +258,16 @@ export async function publishStory(
     );
   }
 
-  // Meta fetches the URL while creating the container and answers a zero-byte
-  // file with a bare 500, which says nothing about what went wrong. Catching it
-  // here keeps a reader-side failure from costing three requests and a
-  // misleading log line.
-  if (media.buffer.length === 0) {
-    throw new PermanentError(
-      `Story ${media.id} carries no media bytes; refusing to publish an empty file.`
-    );
+  // Meta diagnoses none of this usefully: an empty file comes back as a bare
+  // 500, and anything oversized as a container that sits in IN_PROGRESS and
+  // then ends in ERROR with no reason. Both are cheaper and clearer here.
+  const refusal = rejectionReason({
+    mediaType: media.mediaType,
+    bytes: media.buffer.length,
+    durationSeconds: media.durationSeconds,
+  });
+  if (refusal) {
+    throw new PermanentError(`Story ${media.id} cannot be published: ${refusal}.`);
   }
 
   const hosted = mediaServer.host(media.buffer, media.mediaType);

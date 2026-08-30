@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { parseScopes, type StoryScope } from './telegram/scope.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -39,6 +40,12 @@ export interface TelegramConfig {
   phoneNumber: string;
   sessionString: string;
   monitoredPeers: string[];
+  /**
+   * Which story audiences may be republished. Instagram publishes to every
+   * follower with no way to narrow it, so anything but 'public' widens the
+   * audience the author chose.
+   */
+  allowedScopes: StoryScope[];
 }
 
 export interface InstagramConfig {
@@ -61,6 +68,11 @@ export interface AppConfig {
   instagram: InstagramConfig;
   mediaServer: MediaServerSettings;
   pollIntervalSeconds: number;
+  /**
+   * Consecutive publish failures before the account is messaged in its own
+   * Saved Messages. 0 turns the alert off.
+   */
+  alertAfterFailures: number;
   databasePath: string;
   tempDir: string;
   sessionFilePath: string;
@@ -104,6 +116,7 @@ export function loadConfig(): AppConfig {
       phoneNumber: requireEnv('TELEGRAM_PHONE_NUMBER'),
       sessionString: optionalEnv('TELEGRAM_SESSION_STRING'),
       monitoredPeers: parseListEnv('TELEGRAM_MONITORED_PEERS'),
+      allowedScopes: parseScopes(process.env.TELEGRAM_STORY_SCOPES),
     },
     instagram: {
       accountId: requireEnv('INSTAGRAM_ACCOUNT_ID'),
@@ -119,6 +132,7 @@ export function loadConfig(): AppConfig {
       ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600),
     },
     pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120),
+    alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3),
     databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
     tempDir: optionalEnv('TEMP_DIR', './data/temp'),
     sessionFilePath: optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt'),

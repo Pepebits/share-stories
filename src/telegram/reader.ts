@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
 import { StoryMedia } from './types.js';
 import { isVideoBuffer } from '../bridge/media.js';
+import { rejectionReason, type MediaFacts } from '../instagram/limits.js';
+import { storyScope, type StoryScope } from './scope.js';
 import { prompt } from '../utils/prompt.js';
 
 /**
@@ -23,6 +25,8 @@ export interface TelegramReaderConfig {
   phoneNumber: string;
   sessionString: string;
   tempDir: string;
+  /** Story audiences that may be republished. See scope.ts for why. */
+  allowedScopes: StoryScope[];
 }
 
 /** GramJS returns ids as BigInteger instances, not numbers. */
@@ -39,6 +43,13 @@ interface RawStory {
   date?: number;
   caption?: string | null;
   media?: unknown;
+  /** Audience flags. Telegram sets only the ones that apply. */
+  public?: boolean;
+  closeFriends?: boolean;
+  contacts?: boolean;
+  selectedContacts?: boolean;
+  /** The author disabled forwarding and screenshots. */
+  noforwards?: boolean;
   /**
    * 'StoryItem' when the story arrived whole. GetAllStories sends only the
    * newest few that way; everything behind them comes as a 'StoryItemSkipped'
@@ -60,6 +71,48 @@ interface RawPeer {
 interface PeerNames {
   handles: string[];
   title?: string;
+}
+
+/** The shape of the two media types a story can carry, as GramJS returns them. */
+interface RawMedia {
+  document?: {
+    size?: { toString(): string } | number;
+    mimeType?: string;
+    attributes?: { className?: string; duration?: number }[];
+  };
+  photo?: { sizes?: { size?: number }[] };
+}
+
+/**
+ * What Telegram says about a story's media before any of it is downloaded.
+ *
+ * Sizes arrive as BigInteger, and a story whose media is a document could be
+ * either a photo or a video — the mime type is the only hint available this
+ * early, and it is only used to pick which limit applies.
+ */
+function describeTelegramMedia(media: unknown): MediaFacts {
+  const raw = (media ?? {}) as RawMedia;
+
+  if (raw.document) {
+    const video = (raw.document.attributes ?? []).find(
+      (attribute) => attribute.className === 'DocumentAttributeVideo'
+    );
+    const size = raw.document.size;
+
+    return {
+      mediaType: raw.document.mimeType?.startsWith('video/') ? 'video' : 'photo',
+      bytes: size === undefined ? undefined : Number(size.toString()),
+      durationSeconds: video?.duration,
+    };
+  }
+
+  if (raw.photo) {
+    // Several renditions are offered; downloadMedia takes the largest.
+    const sizes = (raw.photo.sizes ?? []).map((size) => size.size ?? 0);
+    return { mediaType: 'photo', bytes: sizes.length ? Math.max(...sizes) : undefined };
+  }
+
+  return { mediaType: 'photo' };
 }
 
 function namesOf(peer: RawPeer): PeerNames {
@@ -273,6 +326,35 @@ export class TelegramStoryReader {
     // or one of the two would silently never be published.
     const storyId = `${peerId}:${story.id}`;
 
+    // Instagram cannot publish to a restricted audience, so a story meant for
+    // close friends would arrive there in front of every follower. Refusing to
+    // carry it is the only way to keep the author's intent.
+    const scope = storyScope(story);
+    if (!this.config.allowedScopes.includes(scope)) {
+      this.logger.info('Skipping story: its audience does not survive the crossing', {
+        storyId,
+        scope,
+        allowed: this.config.allowedScopes,
+      });
+      return null;
+    }
+
+    // Forwarding disabled is the author saying this should not travel. It is
+    // a weaker signal than the audience flags, but it points the same way.
+    if (story.noforwards) {
+      this.logger.info('Skipping story: the author disabled forwarding', { storyId });
+      return null;
+    }
+
+    // Telegram states the size and duration up front, so a story Instagram
+    // would refuse can be dropped without spending the download on it.
+    const facts = describeTelegramMedia(story.media);
+    const refusal = rejectionReason(facts);
+    if (refusal) {
+      this.logger.warn('Skipping a story Instagram would refuse', { storyId, reason: refusal });
+      return null;
+    }
+
     const buffer = await this.download(story, storyId);
     if (!buffer) {
       this.logger.warn('No media could be downloaded for story', { storyId });
@@ -284,9 +366,10 @@ export class TelegramStoryReader {
       sourceUser: peerLabel,
       sourcePlatform: 'telegram',
       // Telegram delivers photos and videos alike as documents, so the bytes
-      // are the only reliable signal.
+      // are the only reliable signal of which this actually is.
       mediaType: isVideoBuffer(buffer) ? 'video' : 'photo',
       buffer,
+      durationSeconds: facts.durationSeconds,
       caption: story.caption ?? undefined,
       timestamp: story.date ? story.date * 1000 : Date.now(),
     };
@@ -325,6 +408,29 @@ export class TelegramStoryReader {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
+    }
+  }
+
+  /**
+   * Writes a note to the account's own Saved Messages.
+   *
+   * This runs unattended, and the last failure went unnoticed for eleven days
+   * because nothing but the log ever said anything. Telegram is the one
+   * channel already authenticated here and already on the operator's phone,
+   * so it costs no new credential and no new service.
+   */
+  async notifySelf(text: string): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      await this.client.sendMessage('me', { message: text });
+      this.logger.debug('Alert sent to Saved Messages');
+    } catch (error) {
+      // An alert that cannot be delivered must not take down the bridge that
+      // was trying to report it.
+      this.logger.warn('Could not deliver the alert to Saved Messages', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

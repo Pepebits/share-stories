@@ -32,6 +32,7 @@ describe('createTgToIgBridge', () => {
   /** Records the predicate the bridge hands the reader, and what it allowed. */
   const stubReader = (available: string[]) => {
     const asked: string[][] = [];
+    const alerts: string[] = [];
 
     const reader = {
       getStoriesForPeers: (_peers: string[], isWanted: (id: string) => boolean = () => true) => {
@@ -39,16 +40,20 @@ describe('createTgToIgBridge', () => {
         asked.push(allowed);
         return Promise.resolve(allowed.map(story));
       },
+      notifySelf: (text: string) => {
+        alerts.push(text);
+        return Promise.resolve();
+      },
     } as unknown as TelegramStoryReader;
 
-    return { reader, asked };
+    return { reader, asked, alerts };
   };
 
   const neverPublishes = {
     host: () => ({ url: 'http://example.invalid/x.jpg', release: () => {} }),
   } as unknown as MediaServer;
 
-  const bridgeOver = (reader: TelegramStoryReader) =>
+  const bridgeOver = (reader: TelegramStoryReader, alertAfterFailures = 0) =>
     createTgToIgBridge(
       reader,
       neverPublishes,
@@ -56,6 +61,7 @@ describe('createTgToIgBridge', () => {
       {
         pollIntervalMs: 60_000,
         monitoredPeers: ['@someone'],
+        alertAfterFailures,
         // Publishing is not configured, so every attempt fails permanently —
         // which is exactly what exercises the retry accounting.
         instagram: () => ({ accountId: '', accessToken: '' }),
@@ -139,6 +145,49 @@ describe('createTgToIgBridge', () => {
       asked.filter((batch) => batch.length > 0).length <= MAX_ATTEMPTS,
       `at most ${MAX_ATTEMPTS} cycles should have fetched it`
     );
+  });
+
+  /**
+   * The whole point of the alert: eleven days of failures went unnoticed
+   * because nothing but the log ever said so.
+   */
+  describe('alerting', () => {
+    it('says nothing until the threshold is reached', async () => {
+      const { reader, alerts } = stubReader(['peer:1', 'peer:2']);
+
+      await pollOnce(bridgeOver(reader, 3));
+
+      assert.equal(alerts.length, 0, 'two failures is below the threshold');
+    });
+
+    it('sends one message once enough publishes fail in a row', async () => {
+      const { reader, alerts } = stubReader(['peer:1', 'peer:2', 'peer:3', 'peer:4']);
+
+      await pollOnce(bridgeOver(reader, 3));
+
+      assert.equal(alerts.length, 1, 'exactly one message, not one per failure');
+      assert.match(alerts[0], /failed to publish/);
+    });
+
+    // An alert per failure during an outage is noise, and noise stops being read.
+    it('does not repeat itself while the failures continue', async () => {
+      const { reader, alerts } = stubReader(['peer:1', 'peer:2', 'peer:3', 'peer:4']);
+      const bridge = bridgeOver(reader, 3);
+
+      await pollOnce(bridge);
+      await rewindBackoff();
+      await pollOnce(bridge);
+
+      assert.equal(alerts.length, 1, 'still just the one');
+    });
+
+    it('stays quiet when the alert is switched off', async () => {
+      const { reader, alerts } = stubReader(['peer:1', 'peer:2', 'peer:3', 'peer:4']);
+
+      await pollOnce(bridgeOver(reader, 0));
+
+      assert.equal(alerts.length, 0);
+    });
   });
 
   /** Pulls every failure timestamp back so the next cycle is due immediately. */

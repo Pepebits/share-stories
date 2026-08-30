@@ -109,6 +109,7 @@ async function main(): Promise<void> {
       phoneNumber: config.telegram.phoneNumber,
       sessionString: config.telegram.sessionString,
       tempDir: config.tempDir,
+      allowedScopes: config.telegram.allowedScopes,
     },
     logger
   );
@@ -135,6 +136,7 @@ async function main(): Promise<void> {
       pollIntervalMs: config.pollIntervalSeconds * 1000,
       monitoredPeers: config.telegram.monitoredPeers,
       instagram: () => tokens.config(),
+      alertAfterFailures: config.alertAfterFailures,
       quota,
     },
     logger
