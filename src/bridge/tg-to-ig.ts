@@ -1,6 +1,6 @@
 import { TelegramStoryReader } from '../telegram/reader.js';
 import { publishStory, PermanentError } from '../instagram/graph-api.js';
-import { StateStore } from '../db/state.js';
+import { StateStore, MAX_ATTEMPTS } from '../db/state.js';
 import { Logger } from '../utils/logger.js';
 import { InstagramPublishConfig } from '../instagram/types.js';
 import { QuotaGuard, QuotaExceededError } from '../instagram/quota.js';
@@ -56,6 +56,16 @@ export function createTgToIgBridge(
         error: message,
         permanent: error instanceof PermanentError,
       });
+
+      // Said once, when it happens — the alternative is silence, and a story
+      // that quietly stops being attempted is the kind of thing you find out
+      // about days later.
+      if (store.retryState(story.id, 'telegram', 'instagram') === 'exhausted') {
+        logger.warn('Giving up on this story until it expires', {
+          storyId: story.id,
+          attempts: MAX_ATTEMPTS,
+        });
+      }
     }
   };
 
@@ -69,6 +79,15 @@ export function createTgToIgBridge(
       for (const story of stories) {
         if (!running) break;
         if (store.isProcessed(story.id, 'telegram', 'instagram')) continue;
+
+        // A failed story is worth another go, but not on every cycle and not
+        // forever: without this a story that cannot succeed is retried until
+        // it expires, at three requests to Meta a time.
+        const retry = store.retryState(story.id, 'telegram', 'instagram');
+        if (retry !== 'ready') {
+          logger.debug('Holding off on a failed story', { storyId: story.id, retry });
+          continue;
+        }
 
         try {
           // Checked before the story is touched: exceeding the quota is a

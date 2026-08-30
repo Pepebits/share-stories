@@ -39,6 +39,13 @@ interface RawStory {
   date?: number;
   caption?: string | null;
   media?: unknown;
+  /**
+   * 'StoryItem' when the story arrived whole. GetAllStories sends only the
+   * newest few that way; everything behind them comes as a 'StoryItemSkipped'
+   * placeholder holding an id and a date and nothing else, and gaps in the
+   * numbering come as 'StoryItemDeleted'.
+   */
+  className?: string;
 }
 
 /** Telegram allows several usernames; the legacy field is null when it does. */
@@ -155,7 +162,7 @@ export class TelegramStoryReader {
         continue;
       }
 
-      for (const story of entry.stories ?? []) {
+      for (const story of await this.resolveSkipped(entry, label)) {
         try {
           const media = await this.toStoryMedia(story, label, peerId);
           if (media) results.push(media);
@@ -172,12 +179,71 @@ export class TelegramStoryReader {
     return results;
   }
 
+  /**
+   * Replaces the placeholders GetAllStories returns with the real thing.
+   *
+   * Only the newest few stories arrive whole; the rest are StoryItemSkipped,
+   * carrying no media at all. downloadMedia does not fail on one — it resolves
+   * to an empty buffer — so without this every story but the newest handful
+   * reaches Instagram as a zero-byte file, and Meta answers those with an
+   * opaque 500. Fetching them by id is what Telegram expects a client to do.
+   */
+  private async resolveSkipped(entry: PeerStories, peerLabel: string): Promise<RawStory[]> {
+    const client = this.client;
+    const stories = entry.stories ?? [];
+    if (!client) return stories;
+
+    // Deleted stories are holes in the numbering; there is nothing to fetch.
+    const skipped = stories.filter(
+      (story) => story.className === 'StoryItemSkipped' && story.id !== undefined
+    );
+    if (skipped.length === 0) return stories;
+
+    try {
+      const full = (await client.invoke(
+        new Api.stories.GetStoriesByID({
+          peer: await client.getInputEntity(entry.peer as never),
+          id: skipped.map((story) => story.id as number),
+        })
+      )) as unknown as { stories?: RawStory[] };
+
+      const resolved = new Map((full.stories ?? []).map((story) => [story.id, story]));
+
+      this.logger.debug('Resolved skipped stories', {
+        peer: peerLabel,
+        requested: skipped.length,
+        resolved: resolved.size,
+      });
+
+      return stories.map((story) => resolved.get(story.id) ?? story);
+    } catch (error) {
+      // Leaving them unresolved is safe: they stay media-less, and the empty
+      // buffer they produce is caught before anything is published.
+      this.logger.warn('Could not resolve skipped stories; they are ignored this cycle', {
+        peer: peerLabel,
+        count: skipped.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return stories;
+    }
+  }
+
   private async toStoryMedia(
     story: RawStory,
     peerLabel: string,
     peerId: string
   ): Promise<StoryMedia | null> {
     if (!this.client || story.id === undefined) return null;
+
+    // Anything still not a full StoryItem could not be resolved above, and has
+    // no media to download.
+    if (story.className && story.className !== 'StoryItem') {
+      this.logger.debug('Skipping story that carries no media', {
+        storyId: `${peerId}:${story.id}`,
+        className: story.className,
+      });
+      return null;
+    }
 
     // Story ids restart per peer — two channels can both own story 3 — and the
     // state store dedupes on this across every peer, so it must be qualified
@@ -212,10 +278,15 @@ export class TelegramStoryReader {
     const client = this.client;
     if (!client) return null;
 
+    // An empty result means "nothing to download", but Buffer.alloc(0) is
+    // truthy, so returning it as-is would satisfy every caller's `if (buffer)`
+    // and defeat the fallback below. Normalise it to null instead.
+    const notEmpty = (buffer: Buffer): Buffer | null => (buffer.length > 0 ? buffer : null);
+
     const attempt = async (target: unknown): Promise<Buffer | null> => {
       const downloaded = await client.downloadMedia(target as never, {});
-      if (Buffer.isBuffer(downloaded)) return downloaded;
-      if (typeof downloaded === 'string') return readFile(downloaded);
+      if (Buffer.isBuffer(downloaded)) return notEmpty(downloaded);
+      if (typeof downloaded === 'string') return notEmpty(await readFile(downloaded));
       return null;
     };
 

@@ -128,6 +128,26 @@ describe('publishStory', () => {
       assert.equal(meta.callsTo('POST', '/media_publish').length, 0, 'must not publish');
     });
 
+    // Regression: Telegram hands back an empty buffer for a story whose media
+    // it never sent, and an empty Buffer is truthy, so it used to travel all
+    // the way to Meta. Meta answered every one with a bare 500, which the retry
+    // logic read as transient — three requests per story, per poll cycle, for
+    // as long as the story stayed active.
+    it('refuses to publish a story with no media bytes', async () => {
+      const empty = story({ buffer: Buffer.alloc(0) });
+
+      await assert.rejects(
+        () => publishStory(empty, config, mediaServer, silentLogger, FAST),
+        (error: Error) => {
+          assert.ok(error instanceof PermanentError);
+          assert.match(error.message, /no media bytes/);
+          return true;
+        }
+      );
+
+      assert.equal(meta.callsTo('POST', '/media').length, 0, 'must not reach Meta at all');
+    });
+
     it('treats an EXPIRED container as permanent', async () => {
       meta.statusSequence = ['EXPIRED'];
       await assert.rejects(

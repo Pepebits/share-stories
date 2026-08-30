@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { StateStore } from '../src/db/state.js';
+import { DatabaseSync } from 'node:sqlite';
+import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
 
 /**
  * A story stays visible for 24h, so a two-minute poll sees the same one some
@@ -94,6 +95,160 @@ describe('StateStore', () => {
 
       assert.equal(seen('peer:1'), true);
       assert.equal(store.recoverStalled(), 0, 'nothing should still be in flight');
+    });
+  });
+
+  /**
+   * Ten stories that could never succeed were retried 1,563 times over eleven
+   * days, three requests to Meta apiece. The cap stops that; the backoff keeps
+   * the cap from writing off a whole day of stories during a brief outage.
+   */
+  describe('retry cap', () => {
+    const retry = () => store.retryState('peer:1', 'telegram', 'instagram');
+
+    /**
+     * Rewinds the failure timestamp to fake the passage of time, over a second
+     * connection so the store keeps no test-only surface of its own.
+     */
+    const failedMinutesAgo = (minutes: number, id = 'peer:1') => {
+      const db = new DatabaseSync(join(dir, 'state.db'));
+      db.exec(
+        `UPDATE stories SET processed_at = datetime('now', '-${minutes} minutes')
+         WHERE story_id = '${id}'`
+      );
+      db.close();
+    };
+
+    it('is ready to try a story it has never seen', () => {
+      assert.equal(retry(), 'ready');
+    });
+
+    it('is ready again immediately after the first failure', () => {
+      start('peer:1');
+      failed('peer:1');
+
+      assert.equal(retry(), 'ready', 'a first failure should come straight back');
+    });
+
+    it('holds off while the backoff has not elapsed', () => {
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+      failed('peer:1');
+
+      assert.equal(retry(), 'waiting', 'the second failure buys a five minute wait');
+    });
+
+    it('is ready once the backoff has elapsed', () => {
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+      failed('peer:1');
+      failedMinutesAgo(6);
+
+      assert.equal(retry(), 'ready');
+    });
+
+    it('gives up after MAX_ATTEMPTS failures', () => {
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        start('peer:1');
+        failed('peer:1');
+        failedMinutesAgo(500);
+      }
+
+      assert.equal(retry(), 'exhausted');
+    });
+
+    it('stays exhausted however long you wait', () => {
+      for (let i = 0; i < MAX_ATTEMPTS + 3; i++) {
+        start('peer:1');
+        failed('peer:1');
+        failedMinutesAgo(10_000);
+      }
+
+      assert.equal(retry(), 'exhausted');
+    });
+
+    // markProcessing runs before every attempt; resetting the counter there
+    // would mean the cap never fires.
+    it('does not forget past failures when the story is retried', () => {
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+
+      failedMinutesAgo(500);
+      failed('peer:1');
+      failedMinutesAgo(500);
+
+      assert.equal(retry(), 'ready', 'two failures is not yet the cap');
+
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        start('peer:1');
+        failed('peer:1');
+        failedMinutesAgo(500);
+      }
+      assert.equal(retry(), 'exhausted');
+    });
+
+    it('wipes the slate once a story finally publishes', () => {
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+      posted('peer:1');
+
+      assert.equal(retry(), 'ready', 'a success must not leave the counter armed');
+    });
+
+    it('counts each story separately', () => {
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        start('peer:1');
+        failed('peer:1');
+        failedMinutesAgo(500);
+      }
+
+      assert.equal(retry(), 'exhausted');
+      assert.equal(store.retryState('peer:2', 'telegram', 'instagram'), 'ready');
+    });
+
+    // The production database predates the column.
+    it('adds the attempts column to a database that lacks it', () => {
+      store.close();
+
+      const legacy = new DatabaseSync(join(dir, 'legacy.db'));
+      legacy.exec(`
+        CREATE TABLE stories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          platform TEXT NOT NULL,
+          story_id TEXT NOT NULL,
+          source_user TEXT NOT NULL,
+          target_platform TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'new',
+          processed_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          error_message TEXT,
+          UNIQUE(platform, story_id, target_platform)
+        );
+      `);
+      legacy
+        .prepare(
+          `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
+           VALUES ('peer:9', 'telegram', '@x', 'instagram', 'failed')`
+        )
+        .run();
+      legacy.close();
+
+      store = new StateStore(join(dir, 'legacy.db'));
+
+      assert.equal(
+        store.retryState('peer:9', 'telegram', 'instagram'),
+        'ready',
+        'a row that predates the column starts from zero, not written off'
+      );
+
+      store.markFailed('peer:9', 'telegram', 'instagram', 'boom');
+      assert.equal(store.retryState('peer:9', 'telegram', 'instagram'), 'ready');
     });
   });
 
