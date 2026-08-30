@@ -66,6 +66,16 @@ function describeError(error: unknown): string {
       if (metaError.fbtrace_id) parts.push(`fbtrace_id=${metaError.fbtrace_id}`);
       return parts.join(' ');
     }
+
+    // A 5xx from Meta often arrives without that envelope, and "status code
+    // 500" on its own is not a diagnosis. Carry whatever body came back.
+    const body = error.response?.data;
+    if (error.response && body) {
+      const rendered = typeof body === 'string' ? body : JSON.stringify(body);
+      if (rendered && rendered !== '{}') {
+        return `${error.message} — ${rendered.slice(0, 300)}`;
+      }
+    }
     return error.message;
   }
   return error instanceof Error ? error.message : String(error);
@@ -83,7 +93,9 @@ function isPermanent(error: unknown): boolean {
 
 function asPermanentIfHopeless(error: unknown): never {
   if (isPermanent(error)) throw new PermanentError(describeError(error));
-  throw error;
+  // Transient failures are retried, and withRetry logs the message it is given
+  // — so it has to be the described one, not axios's bare status line.
+  throw error instanceof AxiosError ? new Error(describeError(error)) : error;
 }
 
 async function createContainer(
@@ -236,6 +248,16 @@ export async function publishStory(
   if (!isPublishConfigured(config)) {
     throw new PermanentError(
       'Instagram publishing is not configured. Set INSTAGRAM_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.'
+    );
+  }
+
+  // Meta fetches the URL while creating the container and answers a zero-byte
+  // file with a bare 500, which says nothing about what went wrong. Catching it
+  // here keeps a reader-side failure from costing three requests and a
+  // misleading log line.
+  if (media.buffer.length === 0) {
+    throw new PermanentError(
+      `Story ${media.id} carries no media bytes; refusing to publish an empty file.`
     );
   }
 

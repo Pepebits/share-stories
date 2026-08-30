@@ -1,6 +1,6 @@
 {
   "name": "share-stories",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-platform story automation — bridge Telegram and Instagram stories in both directions",
   "type": "module",
   "main": "dist/index.js",

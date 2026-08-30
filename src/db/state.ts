@@ -6,6 +6,25 @@ export type Platform = 'telegram' | 'instagram';
 
 export type StoryStatus = 'processing' | 'posted' | 'failed';
 
+/** Whether a previously failed story is due for another try. */
+export type RetryState = 'ready' | 'waiting' | 'exhausted';
+
+/**
+ * Minutes to wait after the Nth failure before trying again — the first entry
+ * applies after one failure, so a single blip comes straight back around.
+ *
+ * A flat cap is a trap at a two-minute poll: five straight attempts would be
+ * spent in ten minutes, so an outage affecting every story — an expired token,
+ * an unreachable media server — would write off a whole day of stories before
+ * anyone could react. Stretched this way the fifth attempt lands about two
+ * hours after the first, which still kills the retry storm but survives
+ * something transient.
+ */
+const RETRY_BACKOFF_MINUTES = [0, 5, 20, 90];
+
+/** Failures after which a story is written off until it expires. */
+export const MAX_ATTEMPTS = RETRY_BACKOFF_MINUTES.length + 1;
+
 export interface StoredStory {
   id: number;
   platform: Platform;
@@ -16,6 +35,7 @@ export interface StoredStory {
   processed_at: string | null;
   created_at: string;
   error_message: string | null;
+  attempts: number;
 }
 
 /**
@@ -55,6 +75,7 @@ export class StateStore {
         processed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         error_message TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
         UNIQUE(platform, story_id, target_platform)
       );
 
@@ -64,6 +85,52 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_stories_status
         ON stories(status);
     `);
+
+    // CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so a
+    // database created before the retry cap needs the column added by hand.
+    const columns = this.db.prepare('PRAGMA table_info(stories)').all() as { name: string }[];
+    if (!columns.some((column) => column.name === 'attempts')) {
+      this.db.exec('ALTER TABLE stories ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+
+  /**
+   * Whether a failed story is due for another attempt.
+   *
+   * 'ready' for anything not currently in a failed state, so an unseen story
+   * is always worth trying. Retrying regardless of this is what turned ten
+   * stories into 1,563 failed publishes and some 4,700 requests to Meta.
+   */
+  retryState(
+    storyId: string,
+    sourcePlatform: Platform,
+    targetPlatform: Platform
+  ): RetryState {
+    const row = this.db
+      .prepare(
+        `SELECT attempts, processed_at FROM stories
+         WHERE story_id = ? AND platform = ? AND target_platform = ?
+           AND status = 'failed'
+         LIMIT 1`
+      )
+      .get(storyId, sourcePlatform, targetPlatform) as
+      | { attempts?: number; processed_at?: string | null }
+      | undefined;
+
+    if (!row) return 'ready';
+
+    const attempts = Number(row.attempts ?? 0);
+    if (attempts >= MAX_ATTEMPTS) return 'exhausted';
+
+    const waitMinutes = RETRY_BACKOFF_MINUTES[attempts - 1] ?? 0;
+    if (waitMinutes === 0 || !row.processed_at) return 'ready';
+
+    // SQLite writes datetime('now') as UTC without a zone marker, which
+    // Date.parse would otherwise read as local time.
+    const failedAt = Date.parse(`${row.processed_at.replace(' ', 'T')}Z`);
+    if (Number.isNaN(failedAt)) return 'ready';
+
+    return Date.now() >= failedAt + waitMinutes * 60_000 ? 'ready' : 'waiting';
   }
 
   /**
@@ -107,7 +174,8 @@ export class StateStore {
   markPosted(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): void {
     this.db
       .prepare(
-        `UPDATE stories SET status = 'posted', processed_at = datetime('now'), error_message = NULL
+        `UPDATE stories SET status = 'posted', processed_at = datetime('now'),
+                error_message = NULL, attempts = 0
          WHERE story_id = ? AND platform = ? AND target_platform = ?`
       )
       .run(storyId, sourcePlatform, targetPlatform);
@@ -121,7 +189,10 @@ export class StateStore {
   ): void {
     this.db
       .prepare(
-        `UPDATE stories SET status = 'failed', processed_at = datetime('now'), error_message = ?
+        // attempts drives the backoff, so it accumulates across cycles; only a
+        // successful publish clears it.
+        `UPDATE stories SET status = 'failed', processed_at = datetime('now'),
+                error_message = ?, attempts = attempts + 1
          WHERE story_id = ? AND platform = ? AND target_platform = ?`
       )
       .run(errorMessage, storyId, sourcePlatform, targetPlatform);
