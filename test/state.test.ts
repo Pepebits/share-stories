@@ -159,14 +159,18 @@ describe('StateStore', () => {
       assert.equal(retry(), 'exhausted');
     });
 
+    // Exactly MAX_ATTEMPTS, which is all the bridge will ever drive it to, and
+    // then a week of waiting: the cap must not decay back into 'ready'.
     it('stays exhausted however long you wait', () => {
-      for (let i = 0; i < MAX_ATTEMPTS + 3; i++) {
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
         start('peer:1');
         failed('peer:1');
-        failedMinutesAgo(10_000);
+        failedMinutesAgo(500);
       }
-
       assert.equal(retry(), 'exhausted');
+
+      failedMinutesAgo(10_080);
+      assert.equal(retry(), 'exhausted', 'time must not revive a written-off story');
     });
 
     // markProcessing runs before every attempt; resetting the counter there

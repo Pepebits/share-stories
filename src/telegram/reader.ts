@@ -111,8 +111,17 @@ export class TelegramStoryReader {
   /**
    * Active stories from the given peers, which may be named by any active
    * username, by title, or by numeric id — private channels have nothing else.
+   *
+   * `isWanted` decides which stories are worth the bandwidth, and is asked
+   * before anything is resolved or downloaded. Without it every active story
+   * would be re-fetched on every poll — a story stays visible for 24h, so that
+   * is some 700 downloads of the same video — and the caller would then throw
+   * away all but the handful it had not already published.
    */
-  async getStoriesForPeers(peers: string[]): Promise<StoryMedia[]> {
+  async getStoriesForPeers(
+    peers: string[],
+    isWanted: (storyId: string) => boolean = () => true
+  ): Promise<StoryMedia[]> {
     if (!this.client) {
       throw new Error('Reader not connected. Call connect() first.');
     }
@@ -162,7 +171,18 @@ export class TelegramStoryReader {
         continue;
       }
 
-      for (const story of await this.resolveSkipped(entry, label)) {
+      // Asked before resolveSkipped, so an already-published story costs
+      // neither a GetStoriesByID nor a download.
+      const pending = (entry.stories ?? []).filter(
+        (story) => story.id !== undefined && isWanted(`${peerId}:${story.id}`)
+      );
+
+      if (pending.length === 0) {
+        this.logger.debug('Nothing new for peer', { peer: label });
+        continue;
+      }
+
+      for (const story of await this.resolveSkipped(entry.peer, pending, label)) {
         try {
           const media = await this.toStoryMedia(story, label, peerId);
           if (media) results.push(media);
@@ -188,9 +208,12 @@ export class TelegramStoryReader {
    * reaches Instagram as a zero-byte file, and Meta answers those with an
    * opaque 500. Fetching them by id is what Telegram expects a client to do.
    */
-  private async resolveSkipped(entry: PeerStories, peerLabel: string): Promise<RawStory[]> {
+  private async resolveSkipped(
+    peer: PeerStories['peer'],
+    stories: RawStory[],
+    peerLabel: string
+  ): Promise<RawStory[]> {
     const client = this.client;
-    const stories = entry.stories ?? [];
     if (!client) return stories;
 
     // Deleted stories are holes in the numbering; there is nothing to fetch.
@@ -202,7 +225,7 @@ export class TelegramStoryReader {
     try {
       const full = (await client.invoke(
         new Api.stories.GetStoriesByID({
-          peer: await client.getInputEntity(entry.peer as never),
+          peer: await client.getInputEntity(peer as never),
           id: skipped.map((story) => story.id as number),
         })
       )) as unknown as { stories?: RawStory[] };
@@ -217,8 +240,8 @@ export class TelegramStoryReader {
 
       return stories.map((story) => resolved.get(story.id) ?? story);
     } catch (error) {
-      // Leaving them unresolved is safe: they stay media-less, and the empty
-      // buffer they produce is caught before anything is published.
+      // Leaving them unresolved is safe: they keep their placeholder className,
+      // which toStoryMedia drops before anything is downloaded.
       this.logger.warn('Could not resolve skipped stories; they are ignored this cycle', {
         peer: peerLabel,
         count: skipped.length,
