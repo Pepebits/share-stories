@@ -16,6 +16,12 @@ export interface TgToIgConfig {
    * stale 60 days in without anything failing loudly.
    */
   instagram: () => InstagramPublishConfig;
+  /**
+   * Consecutive publish failures before the account is messaged. 0 disables
+   * it. Counted across cycles, because the failure worth hearing about is the
+   * one that keeps happening, not the one that resolves itself.
+   */
+  alertAfterFailures: number;
 }
 
 export interface Bridge {
@@ -32,6 +38,11 @@ export function createTgToIgBridge(
 ): Bridge {
   let interval: ReturnType<typeof setInterval> | null = null;
   let running = false;
+  let consecutiveFailures = 0;
+  // Edge-triggered: one message when things break, one when they come back,
+  // and silence in between. A per-failure alert during an outage would be
+  // noise, and noise is what stops being read.
+  let alerted = false;
   // Publishing a video can outlast the poll interval; without this guard the
   // next tick would re-read the same stories and double-post them.
   let polling = false;
@@ -56,6 +67,12 @@ export function createTgToIgBridge(
         to: mediaId,
         user: story.sourceUser,
       });
+
+      consecutiveFailures = 0;
+      if (alerted) {
+        alerted = false;
+        void reader.notifySelf('✅ share-stories: publishing again, a story just went through.');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       store.markFailed(story.id, 'telegram', 'instagram', message);
@@ -73,6 +90,19 @@ export function createTgToIgBridge(
           storyId: story.id,
           attempts: MAX_ATTEMPTS,
         });
+      }
+
+      consecutiveFailures++;
+      if (
+        config.alertAfterFailures > 0 &&
+        !alerted &&
+        consecutiveFailures >= config.alertAfterFailures
+      ) {
+        alerted = true;
+        void reader.notifySelf(
+          `⚠️ share-stories: ${consecutiveFailures} stories in a row failed to publish.\n\n` +
+            `Last error: ${message}`
+        );
       }
     }
   };

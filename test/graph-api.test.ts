@@ -140,7 +140,7 @@ describe('publishStory', () => {
         () => publishStory(empty, config, mediaServer, silentLogger, FAST),
         (error: Error) => {
           assert.ok(error instanceof PermanentError);
-          assert.match(error.message, /no media bytes/);
+          assert.match(error.message, /the media is empty/);
           return true;
         }
       );

@@ -14,6 +14,7 @@ import 'dotenv/config';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { TelegramStoryReader } from '../src/telegram/reader.js';
+import { DEFAULT_ALLOWED_SCOPES } from '../src/telegram/scope.js';
 import { createLogger } from '../src/utils/logger.js';
 import { isInteractive } from '../src/utils/prompt.js';
 
@@ -49,6 +50,8 @@ const reader = new TelegramStoryReader(
     phoneNumber,
     sessionString: process.env.TELEGRAM_SESSION_STRING ?? '',
     tempDir: process.env.TEMP_DIR ?? './data/temp',
+    // This script only authenticates; it never reads a story.
+    allowedScopes: DEFAULT_ALLOWED_SCOPES,
   },
   logger
 );

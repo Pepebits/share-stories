@@ -6,6 +6,8 @@ export interface StoryMedia {
   sourcePlatform: 'telegram' | 'instagram';
   mediaType: 'photo' | 'video';
   buffer: Buffer;
+  /** From Telegram's own metadata, so it is known before the download. */
+  durationSeconds?: number;
   caption?: string;
   /** Epoch milliseconds. */
   timestamp: number;
