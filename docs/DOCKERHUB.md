@@ -14,6 +14,21 @@ Node itself.
 
 ---
 
+## Story audiences do not survive the crossing
+
+Telegram stories have an audience — public, contacts, selected contacts, close
+friends. Instagram's publishing API has none: everything it publishes goes to
+all your followers, and there is no close-friends equivalent to publish into.
+
+A close-friends story therefore arrives on Instagram **public**. The bridge
+cannot narrow it, only decline to carry it. It carries everything by default:
+
+```bash
+TELEGRAM_STORY_SCOPES=public   # only what was already open to everyone
+```
+
+Set that whenever `TELEGRAM_MONITORED_PEERS` names anyone but yourself.
+
 ## What it needs to work
 
 Meta does not accept file uploads: it **downloads** each story from a URL you
