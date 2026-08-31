@@ -29,6 +29,32 @@ docker pull pepebits/share-stories
 
 ---
 
+## Story audiences do not survive the crossing
+
+Telegram stories have an audience: public, contacts, selected contacts, or
+close friends. **Instagram's publishing API has none.** Every story published
+through it goes to all of your followers, and there is no close-friends
+equivalent to publish into.
+
+So a close-friends story from Telegram does not arrive on Instagram as a
+close-friends story. It arrives as a public one. The bridge cannot narrow the
+audience — it can only refuse to carry the story.
+
+**By default it carries everything**, which is what it did before it could read
+audiences at all. To carry only what was already open:
+
+```bash
+TELEGRAM_STORY_SCOPES=public
+```
+
+Worth setting whenever `TELEGRAM_MONITORED_PEERS` names anyone but yourself.
+Widening your own story is your business; widening someone else's is not.
+
+Values are `public`, `contacts`, `selectedContacts`, `closeFriends`, or `all`.
+A value that cannot be parsed falls back to `public` rather than to the
+default, because a typo should not be able to publish more than you meant.
+Stories with forwarding disabled are never republished.
+
 ## Before you share this with anyone
 
 The repository is safe to share. **What it produces at runtime is not.**

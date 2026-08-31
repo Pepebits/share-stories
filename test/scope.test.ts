@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   storyScope,
   parseScopes,
+  isAllowed,
   ALL_SCOPES,
   DEFAULT_ALLOWED_SCOPES,
 } from '../src/telegram/scope.js';
@@ -43,18 +44,36 @@ describe('storyScope', () => {
 
   it('calls a story with no flags unknown rather than public', () => {
     assert.equal(storyScope({}), 'unknown');
-    assert.ok(
-      !DEFAULT_ALLOWED_SCOPES.includes('unknown'),
-      'and unknown must not be republished by default'
-    );
+  });
+});
+
+describe('isAllowed', () => {
+  it('carries a scope that was asked for', () => {
+    assert.equal(isAllowed('public', ['public']), true);
+    assert.equal(isAllowed('closeFriends', ALL_SCOPES), true);
+  });
+
+  it('refuses a scope that was not', () => {
+    assert.equal(isAllowed('closeFriends', ['public']), false);
+    assert.equal(isAllowed('contacts', ['public', 'selectedContacts']), false);
+  });
+
+  // "Everything" includes the audiences we could not name; anything narrower
+  // cannot claim an unreadable audience was permitted.
+  it('carries an unknown audience only when everything is allowed', () => {
+    assert.equal(isAllowed('unknown', ALL_SCOPES), true);
+    assert.equal(isAllowed('unknown', DEFAULT_ALLOWED_SCOPES), true);
+    assert.equal(isAllowed('unknown', ['public']), false);
+    assert.equal(isAllowed('unknown', ['public', 'contacts', 'selectedContacts']), false);
   });
 });
 
 describe('parseScopes', () => {
-  it('defaults to public only', () => {
-    assert.deepEqual(parseScopes(undefined), ['public']);
-    assert.deepEqual(parseScopes(''), ['public']);
-    assert.deepEqual(parseScopes('   '), ['public']);
+  // Matches what the bridge did before it read scopes at all.
+  it('carries everything when nothing is configured', () => {
+    assert.deepEqual(parseScopes(undefined), ALL_SCOPES);
+    assert.deepEqual(parseScopes(''), ALL_SCOPES);
+    assert.deepEqual(parseScopes('   '), ALL_SCOPES);
   });
 
   it('reads a list', () => {
@@ -74,10 +93,13 @@ describe('parseScopes', () => {
     assert.deepEqual(parseScopes('all'), ALL_SCOPES);
   });
 
-  // A typo must not silently widen the audience.
-  it('falls back to the default rather than trusting a value it cannot read', () => {
+  // Someone setting this variable is trying to restrict something. Falling
+  // back to the permissive default would hand a typo the opposite of what it
+  // was reaching for, so an unreadable value narrows instead of widening.
+  it('narrows to public rather than trusting a value it cannot read', () => {
     assert.deepEqual(parseScopes('everyone'), ['public']);
     assert.deepEqual(parseScopes('pubic'), ['public']);
+    assert.notDeepEqual(parseScopes('pubic'), DEFAULT_ALLOWED_SCOPES);
   });
 
   it('keeps the readable half of a partly mistyped list', () => {

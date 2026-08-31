@@ -5,7 +5,7 @@ import { Logger } from '../utils/logger.js';
 import { StoryMedia } from './types.js';
 import { isVideoBuffer } from '../bridge/media.js';
 import { rejectionReason, type MediaFacts } from '../instagram/limits.js';
-import { storyScope, type StoryScope } from './scope.js';
+import { storyScope, isAllowed, type StoryScope } from './scope.js';
 import { prompt } from '../utils/prompt.js';
 
 /**
@@ -327,10 +327,11 @@ export class TelegramStoryReader {
     const storyId = `${peerId}:${story.id}`;
 
     // Instagram cannot publish to a restricted audience, so a story meant for
-    // close friends would arrive there in front of every follower. Refusing to
-    // carry it is the only way to keep the author's intent.
+    // close friends arrives there in front of every follower. Declining to
+    // carry it is the only way to honour the author's intent — which is what
+    // TELEGRAM_STORY_SCOPES is for, though it permits everything by default.
     const scope = storyScope(story);
-    if (!this.config.allowedScopes.includes(scope)) {
+    if (!isAllowed(scope, this.config.allowedScopes)) {
       this.logger.info('Skipping story: its audience does not survive the crossing', {
         storyId,
         scope,
