@@ -12,3 +12,14 @@ export interface StoryMedia {
   /** Epoch milliseconds. */
   timestamp: number;
 }
+
+/** What the bridge needs from a story source, independent of GramJS. */
+export interface StorySource {
+  getStoriesForPeers(
+    peers: string[],
+    isWanted: (storyId: string) => boolean
+  ): Promise<StoryMedia[]>;
+  notifySelf(text: string): Promise<void>;
+  isConnected(): boolean;
+  reconnect(): Promise<void>;
+}

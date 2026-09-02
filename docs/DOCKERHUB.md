@@ -48,7 +48,6 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 | `TELEGRAM_API_ID` | From [my.telegram.org/apps](https://my.telegram.org/apps) |
 | `TELEGRAM_API_HASH` | From the same place |
 | `TELEGRAM_PHONE_NUMBER` | Of the account that reads the stories, E.164 (`+34600000000`) |
-| `TELEGRAM_SESSION_STRING` | Produced by a one-off interactive login — see below |
 | `TELEGRAM_MONITORED_PEERS` | Comma-separated. A peer can be named by any of its usernames, by title, or by numeric id |
 | `INSTAGRAM_ACCOUNT_ID` | Numeric id of an Instagram **Business or Creator** account |
 | `INSTAGRAM_ACCESS_TOKEN` | Long-lived token, starts with `IGAA` |
@@ -57,6 +56,7 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 
 | Variable | Default | What it does |
 |---|---|---|
+| `TELEGRAM_SESSION_STRING` | — | Produced by a one-off interactive login — see below. Leave unset and the session file mounted at `/app/data` is used instead. |
 | `MEDIA_SERVER_HOST` | `127.0.0.1` | **Set to `0.0.0.0` in Docker** — loopback is unreachable from another container |
 | `MEDIA_SERVER_PORT` | `8080` | Port the media server binds |
 | `MEDIA_URL_TTL_SECONDS` | `600` | How long a media URL stays valid if Meta never fetches it |
@@ -76,19 +76,21 @@ republishing every story still active.**
 
 ## First run
 
-`TELEGRAM_SESSION_STRING` cannot be obtained inside a detached container:
-Telegram sends a login code that has to be typed in. Run the one-off login on
-any machine with Node 24.19+:
+The session cannot be obtained inside a detached container: Telegram sends a
+login code that has to be typed in. Run the one-off login on any machine with
+Node 24.19+:
 
 ```bash
 git clone https://github.com/Pepebits/share-stories && cd share-stories
 pnpm install && pnpm run login
 ```
 
-Then copy the resulting string into `TELEGRAM_SESSION_STRING`.
+Copy the resulting `data/telegram-session.txt` into the `data/` directory this
+container mounts (mode `0600`, owned by uid `1000` — the container's non-root
+user).
 
-> That string is an **unscoped credential for the whole Telegram account** —
-> it can read every private message and send as you. Keep it out of images, out
+> That file is an **unscoped credential for the whole Telegram account** — it
+> can read every private message and send as you. Keep it out of images, out
 > of version control, and out of anywhere it might be logged. It can be revoked
 > instantly from **Telegram → Settings → Devices**.
 

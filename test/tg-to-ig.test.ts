@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTgToIgBridge } from '../src/bridge/tg-to-ig.js';
+import { createTgToIgBridge, MAX_RECONNECT_FAILURES } from '../src/bridge/tg-to-ig.js';
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
-import type { TelegramStoryReader } from '../src/telegram/reader.js';
-import type { StoryMedia } from '../src/telegram/types.js';
+import type { StorySource, StoryMedia } from '../src/telegram/types.js';
 import type { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
 
@@ -30,21 +29,24 @@ describe('createTgToIgBridge', () => {
   });
 
   /** Records the predicate the bridge hands the reader, and what it allowed. */
-  const stubReader = (available: string[]) => {
+  const stubReader = (available: string[], overrides: Partial<StorySource> = {}) => {
     const asked: string[][] = [];
     const alerts: string[] = [];
 
-    const reader = {
-      getStoriesForPeers: (_peers: string[], isWanted: (id: string) => boolean = () => true) => {
+    const reader: StorySource = {
+      getStoriesForPeers: (_peers, isWanted = () => true) => {
         const allowed = available.filter((id) => isWanted(id));
         asked.push(allowed);
         return Promise.resolve(allowed.map(story));
       },
-      notifySelf: (text: string) => {
+      notifySelf: (text) => {
         alerts.push(text);
         return Promise.resolve();
       },
-    } as unknown as TelegramStoryReader;
+      isConnected: () => true,
+      reconnect: async () => {},
+      ...overrides,
+    };
 
     return { reader, asked, alerts };
   };
@@ -53,7 +55,11 @@ describe('createTgToIgBridge', () => {
     host: () => ({ url: 'http://example.invalid/x.jpg', release: () => {} }),
   } as unknown as MediaServer;
 
-  const bridgeOver = (reader: TelegramStoryReader, alertAfterFailures = 0) =>
+  const bridgeOver = (
+    reader: StorySource,
+    alertAfterFailures = 0,
+    onFatal: (reason: string) => void = () => {}
+  ) =>
     createTgToIgBridge(
       reader,
       neverPublishes,
@@ -69,6 +75,7 @@ describe('createTgToIgBridge', () => {
           ensureCapacity: async () => {},
           recordPublish: () => {},
         } as never,
+        onFatal,
       },
       silentLogger
     );
@@ -187,6 +194,47 @@ describe('createTgToIgBridge', () => {
       await pollOnce(bridgeOver(reader, 0));
 
       assert.equal(alerts.length, 0);
+    });
+  });
+
+  describe('reconnection', () => {
+    it('fetches stories once a lost connection reconnects', async () => {
+      const { reader, asked } = stubReader(['peer:1'], {
+        isConnected: () => false,
+        reconnect: async () => {},
+      });
+
+      await pollOnce(bridgeOver(reader));
+
+      assert.deepEqual(asked[0], ['peer:1']);
+    });
+
+    it('does not fetch stories when reconnecting fails', async () => {
+      const { reader, asked } = stubReader(['peer:1'], {
+        isConnected: () => false,
+        reconnect: () => Promise.reject(new Error('offline')),
+      });
+
+      await pollOnce(bridgeOver(reader));
+
+      assert.deepEqual(asked, [], 'a failed reconnect must not cost a fetch');
+    });
+
+    it('calls onFatal once reconnecting has failed enough times in a row', async () => {
+      const { reader } = stubReader(['peer:1'], {
+        isConnected: () => false,
+        reconnect: () => Promise.reject(new Error('offline')),
+      });
+      const fatal: string[] = [];
+      const bridge = bridgeOver(reader, 0, (reason) => fatal.push(reason));
+
+      for (let i = 0; i < MAX_RECONNECT_FAILURES - 1; i++) {
+        await pollOnce(bridge);
+      }
+      assert.equal(fatal.length, 0, 'not yet at the threshold');
+
+      await pollOnce(bridge);
+      assert.equal(fatal.length, 1, 'called exactly once at the threshold');
     });
   });
 

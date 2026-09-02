@@ -11,9 +11,9 @@
  *   pnpm run login
  */
 import 'dotenv/config';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { TelegramStoryReader } from '../src/telegram/reader.js';
+import { writeSession } from '../src/telegram/session.js';
 import { DEFAULT_ALLOWED_SCOPES } from '../src/telegram/scope.js';
 import { createLogger } from '../src/utils/logger.js';
 import { isInteractive } from '../src/utils/prompt.js';
@@ -57,15 +57,15 @@ const reader = new TelegramStoryReader(
 );
 
 try {
-  const sessionString = await reader.connect();
+  const sessionString = await reader.login();
 
   const path = resolve(process.cwd(), sessionFile);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, sessionString, { mode: 0o600 });
+  writeSession(path, sessionString);
 
   console.log(`\n✅ Session saved to ${path} (mode 0600)`);
-  console.log('   Copy it into TELEGRAM_SESSION_STRING in .env, then delete the file.');
-  console.log('   It grants full access to this Telegram account — never commit or paste it.\n');
+  console.log('   The bridge reads it from there — nothing else to copy. In Docker, mounting');
+  console.log('   ./data is enough.');
+  console.log('   It grants full access to this Telegram account — never commit or share it.\n');
 } catch (error) {
   console.error('\n❌ Authentication failed:', error instanceof Error ? error.message : error);
   process.exitCode = 1;
