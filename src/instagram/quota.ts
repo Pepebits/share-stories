@@ -1,4 +1,5 @@
 import { Logger } from '../utils/logger.js';
+import { errorMessage } from '../utils/errors.js';
 import { InstagramPublishConfig } from './types.js';
 import { getPublishingLimit, type PublishingLimit } from './graph-api.js';
 
@@ -12,14 +13,33 @@ import { getPublishingLimit, type PublishingLimit } from './graph-api.js';
  */
 
 export class QuotaExceededError extends Error {
-  constructor(
+  private constructor(
     readonly used: number,
     readonly total: number,
-    readonly reserve: number
+    readonly reserve: number,
+    message: string
   ) {
-    super(
+    super(message);
+  }
+
+  static reached(used: number, total: number, reserve: number): QuotaExceededError {
+    return new QuotaExceededError(
+      used,
+      total,
+      reserve,
       `Instagram publish quota reached: ${used}/${total} used in the rolling window` +
         (reserve > 0 ? ` (holding ${reserve} back for manual posting)` : '')
+    );
+  }
+
+  /** Distinct from `reached`: a 0/0 reading would misreport an unknown quota as an empty one. */
+  static unknown(reserve: number): QuotaExceededError {
+    return new QuotaExceededError(
+      0,
+      0,
+      reserve,
+      'Instagram publish quota unknown: content_publishing_limit could not be read, refusing to ' +
+        'publish blind'
     );
   }
 }
@@ -63,12 +83,12 @@ export class QuotaGuard {
     // A failed refresh leaves no reading at all. Publishing blind risks
     // burning a container against a limit we cannot see, so refuse.
     if (!this.limit) {
-      throw new QuotaExceededError(0, 0, this.options.reserve);
+      throw QuotaExceededError.unknown(this.options.reserve);
     }
 
     const usable = this.limit.total - this.options.reserve;
     if (this.limit.used >= usable) {
-      throw new QuotaExceededError(this.limit.used, this.limit.total, this.options.reserve);
+      throw QuotaExceededError.reached(this.limit.used, this.limit.total, this.options.reserve);
     }
   }
 
@@ -100,7 +120,7 @@ export class QuotaGuard {
       this.fetchedAt = now;
     } catch (error) {
       this.logger.error('Could not read the Instagram publish quota', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       // Deliberately leave this.limit as-is: a stale reading plus local
       // counting is still better than no idea at all. Only a guard that has

@@ -2,6 +2,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
+import { errorMessage } from '../utils/errors.js';
 import { StoryMedia, StorySource } from './types.js';
 import { isVideoBuffer } from '../bridge/media.js';
 import { rejectionReason, type MediaFacts } from '../instagram/limits.js';
@@ -27,7 +28,6 @@ export interface TelegramReaderConfig {
   apiHash: string;
   phoneNumber: string;
   sessionString: string;
-  tempDir: string;
   /** Story audiences that may be republished. See scope.ts for why. */
   allowedScopes: StoryScope[];
 }
@@ -234,9 +234,7 @@ export class TelegramStoryReader implements StorySource {
     try {
       response = (await this.client.invoke(new Api.stories.GetAllStories({}))) as never;
     } catch (error) {
-      this.logger.error('Failed to fetch Telegram stories', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.error('Failed to fetch Telegram stories', { error: errorMessage(error) });
       throw error;
     }
 
@@ -292,7 +290,7 @@ export class TelegramStoryReader implements StorySource {
           this.logger.error('Failed to download story media', {
             storyId: story.id,
             peer: label,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
           });
         }
       }
@@ -347,7 +345,7 @@ export class TelegramStoryReader implements StorySource {
       this.logger.warn('Could not resolve skipped stories; they are ignored this cycle', {
         peer: peerLabel,
         count: skipped.length,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       return stories;
     }
@@ -414,7 +412,6 @@ export class TelegramStoryReader implements StorySource {
     return {
       id: storyId,
       sourceUser: peerLabel,
-      sourcePlatform: 'telegram',
       // Telegram delivers photos and videos alike as documents, so the bytes
       // are the only reliable signal of which this actually is.
       mediaType: isVideoBuffer(buffer) ? 'video' : 'photo',
@@ -453,10 +450,7 @@ export class TelegramStoryReader implements StorySource {
       }
       return await attempt(story);
     } catch (error) {
-      this.logger.warn('Story media download failed', {
-        storyId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn('Story media download failed', { storyId, error: errorMessage(error) });
       return null;
     }
   }
@@ -479,7 +473,7 @@ export class TelegramStoryReader implements StorySource {
       // An alert that cannot be delivered must not take down the bridge that
       // was trying to report it.
       this.logger.warn('Could not deliver the alert to Saved Messages', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
     }
   }

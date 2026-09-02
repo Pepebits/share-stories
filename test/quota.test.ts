@@ -101,7 +101,15 @@ describe('publish quota', () => {
     it('refuses to publish when the quota has never been read', async () => {
       meta.quotaResponses = [metaError(500, 'Internal error', 1)];
 
-      await assert.rejects(() => guard().ensureCapacity(), QuotaExceededError);
+      await assert.rejects(
+        () => guard().ensureCapacity(),
+        (error: Error) => {
+          assert.ok(error instanceof QuotaExceededError);
+          // A 0/0 message would misreport an unread quota as an exhausted one.
+          assert.doesNotMatch(error.message, /0\/0/);
+          return true;
+        }
+      );
     });
 
     it('keeps using a stale reading when a later refresh fails', async () => {

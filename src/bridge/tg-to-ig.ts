@@ -1,7 +1,8 @@
-import { StorySource } from '../telegram/types.js';
+import { StorySource, StoryMedia } from '../telegram/types.js';
 import { publishStory, PermanentError } from '../instagram/graph-api.js';
 import { StateStore, MAX_ATTEMPTS } from '../db/state.js';
 import { Logger } from '../utils/logger.js';
+import { errorMessage } from '../utils/errors.js';
 import { InstagramPublishConfig } from '../instagram/types.js';
 import { QuotaGuard, QuotaExceededError } from '../instagram/quota.js';
 import { MediaServer } from '../http/media-server.js';
@@ -61,7 +62,7 @@ export function createTgToIgBridge(
     !store.isProcessed(storyId, 'telegram', 'instagram') &&
     store.retryState(storyId, 'telegram', 'instagram') === 'ready';
 
-  const publish = async (story: Awaited<ReturnType<typeof reader.getStoriesForPeers>>[number]) => {
+  const publish = async (story: StoryMedia) => {
     store.markProcessing(story.id, 'telegram', story.sourceUser, 'instagram');
 
     try {
@@ -80,7 +81,7 @@ export function createTgToIgBridge(
         void reader.notifySelf('✅ share-stories: publishing again, a story just went through.');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       store.markFailed(story.id, 'telegram', 'instagram', message);
       logger.error('TG→IG bridge failed for story', {
         storyId: story.id,
@@ -127,7 +128,7 @@ export function createTgToIgBridge(
           reconnectFailures++;
           logger.warn('Telegram reconnect failed', {
             attempt: reconnectFailures,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
           });
           if (reconnectFailures >= MAX_RECONNECT_FAILURES) {
             config.onFatal(`Telegram unreachable after ${reconnectFailures} reconnect attempts`);
@@ -163,9 +164,7 @@ export function createTgToIgBridge(
         await publish(story);
       }
     } catch (error) {
-      logger.error('TG→IG poll cycle error', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error('TG→IG poll cycle error', { error: errorMessage(error) });
     } finally {
       polling = false;
     }

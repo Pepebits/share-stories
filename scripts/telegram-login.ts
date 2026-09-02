@@ -10,13 +10,15 @@
  *
  *   pnpm run login
  */
-import 'dotenv/config';
 import { resolve } from 'node:path';
 import { TelegramStoryReader } from '../src/telegram/reader.js';
 import { writeSession } from '../src/telegram/session.js';
 import { DEFAULT_ALLOWED_SCOPES } from '../src/telegram/scope.js';
 import { createLogger } from '../src/utils/logger.js';
 import { isInteractive } from '../src/utils/prompt.js';
+import { loadDotEnv } from '../src/utils/env.js';
+
+loadDotEnv();
 
 const apiId = Number(process.env.TELEGRAM_API_ID ?? 0);
 const apiHash = process.env.TELEGRAM_API_HASH ?? '';
@@ -49,7 +51,6 @@ const reader = new TelegramStoryReader(
     apiHash,
     phoneNumber,
     sessionString: process.env.TELEGRAM_SESSION_STRING ?? '',
-    tempDir: process.env.TEMP_DIR ?? './data/temp',
     // This script only authenticates; it never reads a story.
     allowedScopes: DEFAULT_ALLOWED_SCOPES,
   },

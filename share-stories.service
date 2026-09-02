@@ -1,5 +1,5 @@
 [Unit]
-Description=Share Historys — Telegram ↔ Instagram Story Bridge
+Description=share-stories — Telegram → Instagram story bridge
 After=network-online.target
 Wants=network-online.target
 
