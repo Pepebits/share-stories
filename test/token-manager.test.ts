@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TokenManager, type StoredToken } from '../src/instagram/token-manager.js';
@@ -10,6 +11,7 @@ import { silentLogger } from './helpers/logger.js';
 // Fresh port per test — see quota.test.ts for why.
 let nextPort = 45870;
 const DAY_MS = 86_400_000;
+const seedHash = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 describe('TokenManager', () => {
   let meta: MetaStub;
@@ -59,7 +61,7 @@ describe('TokenManager', () => {
         accessToken: 'stored_token',
         expiresAt: Date.now() + 50 * DAY_MS,
         refreshedAt: Date.now(),
-        seededFrom: 'env_token',
+        seedHash: seedHash('env_token'),
       };
       await writeFile(tokenFile, JSON.stringify(stored));
 
@@ -76,7 +78,7 @@ describe('TokenManager', () => {
         accessToken: 'stale_token',
         expiresAt: Date.now() + 50 * DAY_MS,
         refreshedAt: Date.now(),
-        seededFrom: 'old_env_token',
+        seedHash: seedHash('old_env_token'),
       };
       await writeFile(tokenFile, JSON.stringify(stored));
 
@@ -95,6 +97,27 @@ describe('TokenManager', () => {
 
       assert.equal(manager.config().accessToken, 'env_token');
     });
+
+    it('migrates a legacy file that kept the seed token in plaintext', async () => {
+      const legacy = {
+        accessToken: 'legacy_stored_token',
+        expiresAt: Date.now() + 50 * DAY_MS,
+        refreshedAt: Date.now(),
+        seededFrom: 'env_token',
+      };
+      await writeFile(tokenFile, JSON.stringify(legacy));
+
+      const manager = makeManager('env_token');
+      await manager.load();
+
+      assert.equal(manager.config().accessToken, 'legacy_stored_token');
+
+      const onDisk = await readFile(tokenFile, 'utf8');
+      const rewritten = JSON.parse(onDisk) as StoredToken & { seededFrom?: string };
+      assert.equal(rewritten.seedHash, seedHash('env_token'));
+      assert.equal(rewritten.seededFrom, undefined);
+      assert.doesNotMatch(onDisk, /env_token/);
+    });
   });
 
   describe('refreshing', () => {
@@ -112,7 +135,7 @@ describe('TokenManager', () => {
         accessToken: 'healthy_token',
         expiresAt: Date.now() + 55 * DAY_MS,
         refreshedAt: Date.now(),
-        seededFrom: 'env_token',
+        seedHash: seedHash('env_token'),
       };
       await writeFile(tokenFile, JSON.stringify(stored));
 
@@ -129,7 +152,7 @@ describe('TokenManager', () => {
         accessToken: 'expiring_token',
         expiresAt: Date.now() + 3 * DAY_MS,
         refreshedAt: Date.now(),
-        seededFrom: 'env_token',
+        seedHash: seedHash('env_token'),
       };
       await writeFile(tokenFile, JSON.stringify(stored));
 
@@ -184,8 +207,17 @@ describe('TokenManager', () => {
 
       const stored = await readStored();
       assert.equal(stored.accessToken, 'refreshed_1');
-      assert.equal(stored.seededFrom, 'env_token');
+      assert.equal(stored.seedHash, seedHash('env_token'));
       assert.ok(stored.expiresAt && stored.refreshedAt);
+    });
+
+    it('never writes the seed token itself to disk', async () => {
+      const manager = makeManager('env_token');
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      const onDisk = await readFile(tokenFile, 'utf8');
+      assert.doesNotMatch(onDisk, /env_token/);
     });
 
     it('writes the token file owner-readable only', async () => {
