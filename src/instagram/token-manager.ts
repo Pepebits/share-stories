@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { errorMessage } from '../utils/errors.js';
@@ -19,11 +20,22 @@ export interface StoredToken {
   expiresAt: number | null;
   refreshedAt: number | null;
   /**
-   * The .env value this chain started from. If the operator pastes a new token
-   * into .env we must abandon the stored chain rather than keep refreshing a
-   * token they deliberately replaced.
+   * sha256 of the .env value this chain started from. If the operator pastes a
+   * new token into .env we must abandon the stored chain rather than keep
+   * refreshing a token they deliberately replaced — hashed, not stored raw,
+   * because the file on disk should only ever hold a live token.
    */
-  seededFrom: string;
+  seedHash: string;
+}
+
+/** Files written by earlier builds kept the seed token itself instead of its hash. */
+interface StoredTokenFile extends Omit<StoredToken, 'seedHash'> {
+  seedHash?: string;
+  seededFrom?: string;
+}
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 export interface TokenManagerOptions {
@@ -55,7 +67,7 @@ export class TokenManager {
       accessToken: options.envToken,
       expiresAt: null,
       refreshedAt: null,
-      seededFrom: options.envToken,
+      seedHash: hashToken(options.envToken),
     };
   }
 
@@ -73,10 +85,10 @@ export class TokenManager {
   }
 
   async load(): Promise<void> {
-    let stored: StoredToken | null = null;
+    let stored: StoredTokenFile | null = null;
 
     try {
-      stored = JSON.parse(await readFile(this.options.filePath, 'utf8')) as StoredToken;
+      stored = JSON.parse(await readFile(this.options.filePath, 'utf8')) as StoredTokenFile;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT') {
@@ -92,7 +104,11 @@ export class TokenManager {
       return;
     }
 
-    if (stored.seededFrom !== this.options.envToken) {
+    const envHash = hashToken(this.options.envToken);
+    const migratingLegacyFile =
+      stored.seedHash === undefined && stored.seededFrom === this.options.envToken;
+
+    if (stored.seedHash !== envHash && !migratingLegacyFile) {
       this.logger.info(
         'INSTAGRAM_ACCESS_TOKEN changed in .env; discarding the stored refresh chain'
       );
@@ -100,17 +116,26 @@ export class TokenManager {
         accessToken: this.options.envToken,
         expiresAt: null,
         refreshedAt: null,
-        seededFrom: this.options.envToken,
+        seedHash: envHash,
       };
       return;
     }
 
-    this.token = stored;
+    this.token = {
+      accessToken: stored.accessToken,
+      expiresAt: stored.expiresAt,
+      refreshedAt: stored.refreshedAt,
+      seedHash: envHash,
+    };
     this.logger.info('Loaded stored Instagram token', {
       expiresInDays: stored.expiresAt
         ? Math.round((stored.expiresAt - Date.now()) / DAY_MS)
         : 'unknown',
     });
+
+    // Rewrite immediately so the plaintext seed in a file from earlier builds never
+    // reaches disk again, even if a refresh never happens to trigger it.
+    if (migratingLegacyFile) await this.persist();
   }
 
   /**
@@ -143,7 +168,7 @@ export class TokenManager {
         accessToken,
         expiresAt: expiresInSeconds > 0 ? now + expiresInSeconds * 1000 : null,
         refreshedAt: now,
-        seededFrom: this.token.seededFrom,
+        seedHash: this.token.seedHash,
       };
 
       await this.persist();

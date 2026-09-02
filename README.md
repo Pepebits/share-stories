@@ -182,13 +182,14 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
   image --severity HIGH,CRITICAL --ignore-unfixed share-stories:scan
 ```
 
-93 tests, no credentials or network needed: `graph.instagram.com` is stubbed
+198 tests, no credentials or network needed: `graph.instagram.com` is stubbed
 by a local server, so the publish handshake runs end to end — container
 creation, status polling, `ERROR`/`EXPIRED` containers, a rejected token
 aborting without retries, 5xx and 429 retrying, and the media URL being
 revoked on both success and failure.
 
-**Not covered**: `telegram/reader.ts` (GramJS) and the startup path in
+**Not covered**: `telegram/reader.ts` (GramJS) beyond what moved into the
+pure `telegram/feed.ts` module, which is tested, and the startup path in
 `index.ts`. Whether Meta accepts a given video, and whether it can reach
 `PUBLIC_BASE_URL`, can only be learned from a real publish.
 
