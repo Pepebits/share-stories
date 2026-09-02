@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info(`Received ${signal}, shutting down...`);
 
-    bridge.stop();
+    await bridge.stop();
     tokens.stop();
     clearInterval(maintenanceInterval);
 

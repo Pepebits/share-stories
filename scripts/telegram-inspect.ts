@@ -9,6 +9,7 @@
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { loadDotEnv } from '../src/utils/env.js';
+import { namesOf, peerLabel, type RawPeer } from '../src/telegram/feed.js';
 
 loadDotEnv();
 
@@ -29,33 +30,12 @@ const client = new TelegramClient(new StringSession(sessionString), apiId, apiHa
 client.setLogLevel('error' as never);
 await client.connect();
 
-interface Named {
-  id?: unknown;
-  username?: string;
-  // Telegram supports several usernames; when it does, `username` is null
-  // and the real ones live here.
-  usernames?: { username?: string; active?: boolean }[];
-  title?: string;
-  firstName?: string;
-}
-
-const handlesOf = (peer: Named): string[] => [
-  ...(peer.username ? [peer.username] : []),
-  ...(peer.usernames ?? []).flatMap((u) => (u.username ? [u.username] : [])),
-];
-
-const me = (await client.getMe()) as unknown as Named;
-const myHandles = handlesOf(me);
+const me = (await client.getMe()) as unknown as RawPeer;
+const myHandles = namesOf(me).handles;
 console.log(
   `\nAuthenticated as ${myHandles.length ? myHandles.map((h) => '@' + h).join(', ') : (me.firstName ?? '?')}` +
     ` — id ${String(me.id)}\n`
 );
-
-const label = (peer: unknown): string => {
-  const p = peer as Named;
-  const handles = handlesOf(p);
-  return handles.length ? `@${handles[0]}` : (p.title ?? p.firstName ?? String(p.id));
-};
 
 console.log('── stories.GetAllStories ───────────────────────────────');
 const all = (await client.invoke(new Api.stories.GetAllStories({}))) as unknown as {
@@ -73,8 +53,8 @@ if (feed.length === 0) {
     const id = (peerId.userId ?? peerId.channelId)?.toString() ?? '?';
     const user = [...(all.users ?? []), ...(all.chats ?? [])].find(
       (u) => String((u as { id?: unknown }).id) === id
-    );
-    console.log(`  ${user ? label(user) : id} — ${entry.stories.length} story(ies)`);
+    ) as RawPeer | undefined;
+    console.log(`  ${peerLabel(id, user && namesOf(user))} — ${entry.stories.length} story(ies)`);
   }
 }
 

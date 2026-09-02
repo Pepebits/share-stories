@@ -32,7 +32,7 @@ export interface TgToIgConfig {
 
 export interface Bridge {
   start: () => void;
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 export function createTgToIgBridge(
@@ -51,16 +51,17 @@ export function createTgToIgBridge(
   // noise, and noise is what stops being read.
   let alerted = false;
   // Publishing a video can outlast the poll interval; without this guard the
-  // next tick would re-read the same stories and double-post them.
+  // next tick would re-read the same stories and double-post them. Also
+  // tracked as a promise so stop() can await the cycle already in flight.
   let polling = false;
+  let current: Promise<void> = Promise.resolve();
 
   /**
    * Whether a story is worth spending anything on right now — never published,
    * and not a failure that is waiting out its backoff or has been written off.
    */
   const worthAttempting = (storyId: string): boolean =>
-    !store.isProcessed(storyId, 'telegram', 'instagram') &&
-    store.retryState(storyId, 'telegram', 'instagram') === 'ready';
+    store.attemptState(storyId, 'telegram', 'instagram') === 'ready';
 
   const publish = async (story: StoryMedia) => {
     store.markProcessing(story.id, 'telegram', story.sourceUser, 'instagram');
@@ -92,7 +93,7 @@ export function createTgToIgBridge(
       // Said once, when it happens — the alternative is silence, and a story
       // that quietly stops being attempted is the kind of thing you find out
       // about days later.
-      if (store.retryState(story.id, 'telegram', 'instagram') === 'exhausted') {
+      if (store.attemptState(story.id, 'telegram', 'instagram') === 'exhausted') {
         logger.warn('Giving up on this story until it expires', {
           storyId: story.id,
           attempts: MAX_ATTEMPTS,
@@ -137,15 +138,13 @@ export function createTgToIgBridge(
         }
       }
 
-      // The reader downloads whatever it returns, so the "have we settled this
+      // The reader downloads whatever it yields, so the "have we settled this
       // already?" question has to be answered before it fetches, not after.
-      const stories = await reader.getStoriesForPeers(config.monitoredPeers, worthAttempting);
-
-      for (const story of stories) {
+      for await (const story of reader.stories(config.monitoredPeers, worthAttempting)) {
         if (!running) break;
 
-        // Asked again because the whole batch is downloaded before any of it
-        // is published, and publishing a video can outlast a poll interval.
+        // Asked again because a peer's pending stories are all chosen before
+        // any of them is downloaded, and publishing a video can take a while.
         if (!worthAttempting(story.id)) continue;
 
         try {
@@ -170,6 +169,12 @@ export function createTgToIgBridge(
     }
   };
 
+  // Only assigns `current` when a cycle actually starts, so stop() never
+  // ends up awaiting an already-resolved no-op instead of the real one.
+  const triggerPoll = () => {
+    if (running && !polling) current = poll();
+  };
+
   return {
     start() {
       if (running) return;
@@ -178,15 +183,16 @@ export function createTgToIgBridge(
         peers: config.monitoredPeers,
         intervalMs: config.pollIntervalMs,
       });
-      void poll();
-      interval = setInterval(() => void poll(), config.pollIntervalMs);
+      triggerPoll();
+      interval = setInterval(triggerPoll, config.pollIntervalMs);
     },
-    stop() {
+    async stop() {
       running = false;
       if (interval) {
         clearInterval(interval);
         interval = null;
       }
+      await current;
       logger.info('TG→IG bridge stopped');
     },
   };

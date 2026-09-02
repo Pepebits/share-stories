@@ -4,8 +4,18 @@ import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
 import { errorMessage } from '../utils/errors.js';
 import { StoryMedia, StorySource } from './types.js';
-import { isVideoBuffer } from '../bridge/media.js';
-import { rejectionReason, type MediaFacts } from '../instagram/limits.js';
+import {
+  namesOf,
+  peerLabel,
+  matchesPeer,
+  describeTelegramMedia,
+  isVideoBuffer,
+  type PeerId,
+  type RawPeer,
+  type RawStory,
+  type PeerNames,
+} from './feed.js';
+import { rejectionReason } from '../instagram/limits.js';
 import { storyScope, isAllowed, type StoryScope } from './scope.js';
 import { prompt, isInteractive } from '../utils/prompt.js';
 
@@ -32,98 +42,10 @@ export interface TelegramReaderConfig {
   allowedScopes: StoryScope[];
 }
 
-/** GramJS returns ids as BigInteger instances, not numbers. */
-type PeerId = { toString(): string };
-
 /** One entry per peer, each holding that peer's active stories. */
 interface PeerStories {
   peer?: { userId?: PeerId; channelId?: PeerId; chatId?: PeerId };
   stories?: RawStory[];
-}
-
-interface RawStory {
-  id?: number;
-  date?: number;
-  caption?: string | null;
-  media?: unknown;
-  /** Audience flags. Telegram sets only the ones that apply. */
-  public?: boolean;
-  closeFriends?: boolean;
-  contacts?: boolean;
-  selectedContacts?: boolean;
-  /** The author disabled forwarding and screenshots. */
-  noforwards?: boolean;
-  /**
-   * 'StoryItem' when the story arrived whole. GetAllStories sends only the
-   * newest few that way; everything behind them comes as a 'StoryItemSkipped'
-   * placeholder holding an id and a date and nothing else, and gaps in the
-   * numbering come as 'StoryItemDeleted'.
-   */
-  className?: string;
-}
-
-/** Telegram allows several usernames; the legacy field is null when it does. */
-interface RawPeer {
-  id: PeerId;
-  username?: string | null;
-  usernames?: { username?: string }[];
-  title?: string;
-  firstName?: string;
-}
-
-interface PeerNames {
-  handles: string[];
-  title?: string;
-}
-
-/** The shape of the two media types a story can carry, as GramJS returns them. */
-interface RawMedia {
-  document?: {
-    size?: { toString(): string } | number;
-    mimeType?: string;
-    attributes?: { className?: string; duration?: number }[];
-  };
-  photo?: { sizes?: { size?: number }[] };
-}
-
-/**
- * What Telegram says about a story's media before any of it is downloaded.
- *
- * Sizes arrive as BigInteger, and a story whose media is a document could be
- * either a photo or a video — the mime type is the only hint available this
- * early, and it is only used to pick which limit applies.
- */
-function describeTelegramMedia(media: unknown): MediaFacts {
-  const raw = (media ?? {}) as RawMedia;
-
-  if (raw.document) {
-    const video = (raw.document.attributes ?? []).find(
-      (attribute) => attribute.className === 'DocumentAttributeVideo'
-    );
-    const size = raw.document.size;
-
-    return {
-      mediaType: raw.document.mimeType?.startsWith('video/') ? 'video' : 'photo',
-      bytes: size === undefined ? undefined : Number(size.toString()),
-      durationSeconds: video?.duration,
-    };
-  }
-
-  if (raw.photo) {
-    // Several renditions are offered; downloadMedia takes the largest.
-    const sizes = (raw.photo.sizes ?? []).map((size) => size.size ?? 0);
-    return { mediaType: 'photo', bytes: sizes.length ? Math.max(...sizes) : undefined };
-  }
-
-  return { mediaType: 'photo' };
-}
-
-function namesOf(peer: RawPeer): PeerNames {
-  const handles = [
-    ...(peer.username ? [peer.username] : []),
-    ...(peer.usernames ?? []).flatMap((u) => (u.username ? [u.username] : [])),
-  ];
-  return { handles, title: peer.title ?? peer.firstName };
 }
 
 export class TelegramStoryReader implements StorySource {
@@ -213,6 +135,7 @@ export class TelegramStoryReader implements StorySource {
   /**
    * Active stories from the given peers, which may be named by any active
    * username, by title, or by numeric id — private channels have nothing else.
+   * Yields each story as soon as its media is downloaded.
    *
    * `isWanted` decides which stories are worth the bandwidth, and is asked
    * before anything is resolved or downloaded. Without it every active story
@@ -220,15 +143,13 @@ export class TelegramStoryReader implements StorySource {
    * is some 700 downloads of the same video — and the caller would then throw
    * away all but the handful it had not already published.
    */
-  async getStoriesForPeers(
+  async *stories(
     peers: string[],
     isWanted: (storyId: string) => boolean = () => true
-  ): Promise<StoryMedia[]> {
+  ): AsyncIterable<StoryMedia> {
     if (!this.client) {
       throw new Error('Reader not connected. Call connect() first.');
     }
-
-    const results: StoryMedia[] = [];
 
     let response: { peerStories?: PeerStories[]; users?: RawPeer[]; chats?: RawPeer[] };
     try {
@@ -239,7 +160,7 @@ export class TelegramStoryReader implements StorySource {
     }
 
     const feed = response.peerStories ?? [];
-    if (feed.length === 0) return results;
+    if (feed.length === 0) return;
 
     this.logger.debug('Fetched stories from Telegram', {
       peers: feed.length,
@@ -251,22 +172,13 @@ export class TelegramStoryReader implements StorySource {
       names.set(peer.id.toString(), namesOf(peer));
     }
 
-    const wanted = peers.map((p) => p.replace(/^@/, '').toLowerCase());
-
     for (const entry of feed) {
       const peerId =
         (entry.peer?.userId ?? entry.peer?.channelId ?? entry.peer?.chatId)?.toString() ?? '';
       const info = names.get(peerId);
-      const label = info?.handles[0] ? `@${info.handles[0]}` : (info?.title ?? peerId);
+      const label = peerLabel(peerId, info);
 
-      const matches = wanted.some(
-        (w) =>
-          w === peerId ||
-          w === info?.title?.toLowerCase() ||
-          (info?.handles ?? []).some((handle) => handle.toLowerCase() === w)
-      );
-
-      if (!matches) {
+      if (!matchesPeer(peers, peerId, info)) {
         this.logger.debug('Skipping unmonitored peer', { peer: label, peerId });
         continue;
       }
@@ -285,7 +197,7 @@ export class TelegramStoryReader implements StorySource {
       for (const story of await this.resolveSkipped(entry.peer, pending, label)) {
         try {
           const media = await this.toStoryMedia(story, label, peerId);
-          if (media) results.push(media);
+          if (media) yield media;
         } catch (error) {
           this.logger.error('Failed to download story media', {
             storyId: story.id,
@@ -295,8 +207,6 @@ export class TelegramStoryReader implements StorySource {
         }
       }
     }
-
-    return results;
   }
 
   /**

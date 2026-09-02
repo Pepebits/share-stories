@@ -14,7 +14,7 @@ describe('StateStore', () => {
   let dir: string;
   let store: StateStore;
 
-  const seen = (id: string) => store.isProcessed(id, 'telegram', 'instagram');
+  const seen = (id: string) => store.attemptState(id, 'telegram', 'instagram') === 'done';
   const start = (id: string, user = '@someone') =>
     store.markProcessing(id, 'telegram', user, 'instagram');
   const posted = (id: string) => store.markPosted(id, 'telegram', 'instagram');
@@ -66,7 +66,7 @@ describe('StateStore', () => {
       store.markProcessing('peer:1', 'telegram', '@x', 'instagram');
       store.markPosted('peer:1', 'telegram', 'instagram');
 
-      assert.equal(store.isProcessed('peer:1', 'telegram', 'telegram'), false);
+      assert.equal(store.attemptState('peer:1', 'telegram', 'telegram'), 'ready');
     });
   });
 
@@ -104,7 +104,7 @@ describe('StateStore', () => {
    * the cap from writing off a whole day of stories during a brief outage.
    */
   describe('retry cap', () => {
-    const retry = () => store.retryState('peer:1', 'telegram', 'instagram');
+    const retry = () => store.attemptState('peer:1', 'telegram', 'instagram');
 
     /**
      * Rewinds the failure timestamp to fake the passage of time, over a second
@@ -194,14 +194,20 @@ describe('StateStore', () => {
       assert.equal(retry(), 'exhausted');
     });
 
+    // A posted story reports 'done', which is not itself proof the counter was
+    // cleared — so this drives it right up to the edge of exhaustion, posts,
+    // and checks that a single fresh failure lands at 'ready' rather than
+    // 'exhausted', which only happens if the old count was carried forward.
     it('wipes the slate once a story finally publishes', () => {
-      start('peer:1');
-      failed('peer:1');
-      start('peer:1');
-      failed('peer:1');
+      for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
+        start('peer:1');
+        failed('peer:1');
+      }
       start('peer:1');
       posted('peer:1');
 
+      start('peer:1');
+      failed('peer:1');
       assert.equal(retry(), 'ready', 'a success must not leave the counter armed');
     });
 
@@ -213,7 +219,7 @@ describe('StateStore', () => {
       }
 
       assert.equal(retry(), 'exhausted');
-      assert.equal(store.retryState('peer:2', 'telegram', 'instagram'), 'ready');
+      assert.equal(store.attemptState('peer:2', 'telegram', 'instagram'), 'ready');
     });
 
     // The production database predates the column.
@@ -246,19 +252,19 @@ describe('StateStore', () => {
       store = new StateStore(join(dir, 'legacy.db'));
 
       assert.equal(
-        store.retryState('peer:9', 'telegram', 'instagram'),
+        store.attemptState('peer:9', 'telegram', 'instagram'),
         'ready',
         'a row that predates the column starts from zero, not written off'
       );
 
       store.markFailed('peer:9', 'telegram', 'instagram', 'boom');
-      assert.equal(store.retryState('peer:9', 'telegram', 'instagram'), 'ready');
+      assert.equal(store.attemptState('peer:9', 'telegram', 'instagram'), 'ready');
     });
   });
 
   describe('recoverStalled', () => {
     // 'processing' is set before an upload that can take a minute. A crash in
-    // that window used to leave the row blocking isProcessed() forever.
+    // that window used to leave the row blocking attemptState() forever.
     it('frees a story left mid-publish by a crash', () => {
       start('peer:1');
       assert.equal(seen('peer:1'), true);
