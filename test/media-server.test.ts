@@ -5,6 +5,7 @@ import { silentLogger } from './helpers/logger.js';
 
 const PORT = 45790;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+const HEALTH_PORT = 45791;
 
 /** 4KB of recognisable bytes so slices can be compared exactly. */
 const payload = Buffer.from(Array.from({ length: 4096 }, (_, i) => i % 251));
@@ -151,6 +152,51 @@ describe('MediaServer', () => {
 
     it('is not confused by a query string', async () => {
       assert.equal((await fetch(`${ORIGIN}/health?probe=1`)).status, 200);
+    });
+  });
+
+  describe('health backed by isHealthy', () => {
+    const origin = `http://127.0.0.1:${HEALTH_PORT}`;
+    let healthy = true;
+    let checked: MediaServer;
+
+    before(async () => {
+      checked = new MediaServer(
+        {
+          port: HEALTH_PORT,
+          host: '127.0.0.1',
+          publicBaseUrl: origin,
+          ttlMs: 60_000,
+          isHealthy: () => healthy,
+        },
+        silentLogger
+      );
+      await checked.start();
+    });
+
+    after(async () => {
+      await checked.stop();
+    });
+
+    it('answers 503 when the check reports unhealthy', async () => {
+      healthy = false;
+      const response = await fetch(`${origin}/health`);
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), 'unavailable');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    });
+
+    it('answers HEAD with 503 too, for the Dockerfile healthcheck', async () => {
+      healthy = false;
+      const response = await fetch(`${origin}/health`, { method: 'HEAD' });
+      assert.equal(response.status, 503);
+    });
+
+    it('answers 200 once the check reports healthy again', async () => {
+      healthy = true;
+      const response = await fetch(`${origin}/health`);
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'ok');
     });
   });
 

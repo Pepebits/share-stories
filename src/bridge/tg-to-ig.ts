@@ -1,10 +1,13 @@
-import { TelegramStoryReader } from '../telegram/reader.js';
+import { StorySource } from '../telegram/types.js';
 import { publishStory, PermanentError } from '../instagram/graph-api.js';
 import { StateStore, MAX_ATTEMPTS } from '../db/state.js';
 import { Logger } from '../utils/logger.js';
 import { InstagramPublishConfig } from '../instagram/types.js';
 import { QuotaGuard, QuotaExceededError } from '../instagram/quota.js';
 import { MediaServer } from '../http/media-server.js';
+
+/** Consecutive reconnect failures before the bridge gives up and exits. */
+export const MAX_RECONNECT_FAILURES = 5;
 
 export interface TgToIgConfig {
   pollIntervalMs: number;
@@ -22,6 +25,8 @@ export interface TgToIgConfig {
    * one that keeps happening, not the one that resolves itself.
    */
   alertAfterFailures: number;
+  /** Called once reconnecting has failed MAX_RECONNECT_FAILURES times in a row. */
+  onFatal: (reason: string) => void;
 }
 
 export interface Bridge {
@@ -30,7 +35,7 @@ export interface Bridge {
 }
 
 export function createTgToIgBridge(
-  reader: TelegramStoryReader,
+  reader: StorySource,
   mediaServer: MediaServer,
   store: StateStore,
   config: TgToIgConfig,
@@ -39,6 +44,7 @@ export function createTgToIgBridge(
   let interval: ReturnType<typeof setInterval> | null = null;
   let running = false;
   let consecutiveFailures = 0;
+  let reconnectFailures = 0;
   // Edge-triggered: one message when things break, one when they come back,
   // and silence in between. A per-failure alert during an outage would be
   // noise, and noise is what stops being read.
@@ -112,6 +118,24 @@ export function createTgToIgBridge(
     polling = true;
 
     try {
+      if (!reader.isConnected()) {
+        try {
+          await reader.reconnect();
+          reconnectFailures = 0;
+          logger.info('Telegram reconnected');
+        } catch (error) {
+          reconnectFailures++;
+          logger.warn('Telegram reconnect failed', {
+            attempt: reconnectFailures,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          if (reconnectFailures >= MAX_RECONNECT_FAILURES) {
+            config.onFatal(`Telegram unreachable after ${reconnectFailures} reconnect attempts`);
+          }
+          return;
+        }
+      }
+
       // The reader downloads whatever it returns, so the "have we settled this
       // already?" question has to be answered before it fetches, not after.
       const stories = await reader.getStoriesForPeers(config.monitoredPeers, worthAttempting);

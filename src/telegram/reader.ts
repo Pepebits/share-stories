@@ -2,11 +2,14 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
-import { StoryMedia } from './types.js';
+import { StoryMedia, StorySource } from './types.js';
 import { isVideoBuffer } from '../bridge/media.js';
 import { rejectionReason, type MediaFacts } from '../instagram/limits.js';
 import { storyScope, isAllowed, type StoryScope } from './scope.js';
-import { prompt } from '../utils/prompt.js';
+import { prompt, isInteractive } from '../utils/prompt.js';
+
+/** Thrown when the configured session is missing or Telegram has revoked it. */
+export class TelegramSessionError extends Error {}
 
 /**
  * Reads active Telegram stories over MTProto.
@@ -123,7 +126,7 @@ function namesOf(peer: RawPeer): PeerNames {
   return { handles, title: peer.title ?? peer.firstName };
 }
 
-export class TelegramStoryReader {
+export class TelegramStoryReader implements StorySource {
   private client: TelegramClient | null = null;
 
   constructor(
@@ -131,7 +134,43 @@ export class TelegramStoryReader {
     private readonly logger: Logger
   ) {}
 
+  /**
+   * Connects with an existing session, for unattended starts. Never calls
+   * client.start(): with a revoked session that sends a login code to the
+   * account's other devices before checking anything, then loops in
+   * signInUser (telegram/client/auth.js) until onError returns true.
+   */
   async connect(): Promise<string> {
+    this.client = new TelegramClient(
+      new StringSession(this.config.sessionString),
+      this.config.apiId,
+      this.config.apiHash,
+      { connectionRetries: 5 }
+    );
+
+    await this.client.connect();
+
+    if (!(await this.client.isUserAuthorized())) {
+      await this.client.disconnect();
+      this.client = null;
+      throw new TelegramSessionError(
+        'Telegram session is missing or revoked. Run `pnpm run login` and put the result in ' +
+          'TELEGRAM_SESSION_FILE (or TELEGRAM_SESSION_STRING).'
+      );
+    }
+
+    const sessionString = this.client.session.save() as unknown as string;
+
+    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
+    this.logger.info('GramJS connected', {
+      as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
+    });
+
+    return sessionString;
+  }
+
+  /** First-run interactive authentication. See scripts/telegram-login.ts. */
+  async login(): Promise<string> {
     this.client = new TelegramClient(
       new StringSession(this.config.sessionString),
       this.config.apiId,
@@ -146,8 +185,11 @@ export class TelegramStoryReader {
       // blocking on a stdin that will never deliver.
       phoneCode: () => prompt('Telegram login code: '),
       password: () => prompt('Telegram 2FA password: ', true),
-      onError: (error: Error) => {
+      onError: (error: Error): Promise<boolean> => {
         this.logger.error('GramJS connection error', { error: error.message });
+        // At a terminal GramJS asks again; without one there is nobody to ask,
+        // so returning true makes it stop instead of looping.
+        return Promise.resolve(!isInteractive());
       },
     });
 
@@ -159,6 +201,13 @@ export class TelegramStoryReader {
     });
 
     return sessionString;
+  }
+
+  async reconnect(): Promise<void> {
+    if (!this.client) {
+      throw new Error('Reader not connected. Call connect() first.');
+    }
+    await this.client.connect();
   }
 
   /**

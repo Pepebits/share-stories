@@ -1,10 +1,9 @@
-import { writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { createLogger } from './utils/logger.js';
 import { StateStore } from './db/state.js';
-import { TelegramStoryReader } from './telegram/reader.js';
+import { TelegramStoryReader, TelegramSessionError } from './telegram/reader.js';
+import { writeSession } from './telegram/session.js';
 import { getAccountInfo } from './instagram/graph-api.js';
 import { TokenManager, DEFAULT_TOKEN_OPTIONS } from './instagram/token-manager.js';
 import { QuotaGuard } from './instagram/quota.js';
@@ -72,6 +71,33 @@ async function main(): Promise<void> {
   }
   logger.info(`Instagram account ready: @${account.username}`);
 
+  const reader = new TelegramStoryReader(
+    {
+      apiId: config.telegram.apiId,
+      apiHash: config.telegram.apiHash,
+      phoneNumber: config.telegram.phoneNumber,
+      sessionString: config.telegram.sessionString,
+      tempDir: config.tempDir,
+      allowedScopes: config.telegram.allowedScopes,
+    },
+    logger
+  );
+
+  // Connected before anything starts listening: if the session is no good,
+  // better to have opened nothing at all.
+  const sessionString = await reader.connect();
+
+  if (sessionString !== config.telegram.sessionString) {
+    writeSession(config.telegram.sessionFile, sessionString);
+    logger.info('Telegram session updated', { path: config.telegram.sessionFile });
+    if (process.env.TELEGRAM_SESSION_STRING) {
+      logger.warn(
+        'TELEGRAM_SESSION_STRING in the environment is now stale; remove it and the session ' +
+          'file will be used.'
+      );
+    }
+  }
+
   const quota = new QuotaGuard(
     () => tokens.config(),
     {
@@ -97,63 +123,14 @@ async function main(): Promise<void> {
       host: config.mediaServer.host,
       publicBaseUrl: config.mediaServer.publicBaseUrl,
       ttlMs: config.mediaServer.ttlSeconds * 1000,
+      isHealthy: () => reader.isConnected(),
     },
     logger
   );
   await mediaServer.start();
 
-  const reader = new TelegramStoryReader(
-    {
-      apiId: config.telegram.apiId,
-      apiHash: config.telegram.apiHash,
-      phoneNumber: config.telegram.phoneNumber,
-      sessionString: config.telegram.sessionString,
-      tempDir: config.tempDir,
-      allowedScopes: config.telegram.allowedScopes,
-    },
-    logger
-  );
-
-  const sessionString = await reader.connect();
-
-  // The session string is a bearer credential for the Telegram account. It
-  // must never reach the logs, which on a VPS means journald and any shipper.
-  if (sessionString && sessionString !== config.telegram.sessionString) {
-    const sessionPath = resolve(config.projectRoot, config.sessionFilePath);
-    await mkdir(dirname(sessionPath), { recursive: true });
-    await writeFile(sessionPath, sessionString, { mode: 0o600 });
-    logger.warn(
-      `New Telegram session written to ${sessionPath} (mode 0600). ` +
-        'Copy it into TELEGRAM_SESSION_STRING to skip re-authentication, then delete the file.'
-    );
-  }
-
-  const bridge = createTgToIgBridge(
-    reader,
-    mediaServer,
-    store,
-    {
-      pollIntervalMs: config.pollIntervalSeconds * 1000,
-      monitoredPeers: config.telegram.monitoredPeers,
-      instagram: () => tokens.config(),
-      alertAfterFailures: config.alertAfterFailures,
-      quota,
-    },
-    logger
-  );
-
-  if (config.telegram.monitoredPeers.length === 0) {
-    logger.warn('TELEGRAM_MONITORED_PEERS is empty — nothing will be bridged.');
-  }
-
-  bridge.start();
-  logger.info(
-    `Bridge running | poll ${config.pollIntervalSeconds}s | ` +
-      `peers: ${config.telegram.monitoredPeers.length}`
-  );
-
   let shuttingDown = false;
-  const shutdown = async (signal: string) => {
+  const shutdown = async (signal: string, exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info(`Received ${signal}, shutting down...`);
@@ -171,14 +148,46 @@ async function main(): Promise<void> {
 
     store.close();
     logger.info('Shutdown complete');
-    process.exit(0);
+    process.exit(exitCode);
   };
+
+  const bridge = createTgToIgBridge(
+    reader,
+    mediaServer,
+    store,
+    {
+      pollIntervalMs: config.pollIntervalSeconds * 1000,
+      monitoredPeers: config.telegram.monitoredPeers,
+      instagram: () => tokens.config(),
+      alertAfterFailures: config.alertAfterFailures,
+      quota,
+      onFatal: (reason) => {
+        logger.error(reason);
+        void shutdown('fatal', 1);
+      },
+    },
+    logger
+  );
+
+  if (config.telegram.monitoredPeers.length === 0) {
+    logger.warn('TELEGRAM_MONITORED_PEERS is empty — nothing will be bridged.');
+  }
+
+  bridge.start();
+  logger.info(
+    `Bridge running | poll ${config.pollIntervalSeconds}s | ` +
+      `peers: ${config.telegram.monitoredPeers.length}`
+  );
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 main().catch((error: unknown) => {
-  console.error('Fatal startup error:', error instanceof Error ? error.message : error);
+  if (error instanceof TelegramSessionError) {
+    console.error(error.message);
+  } else {
+    console.error('Fatal startup error:', error instanceof Error ? error.message : error);
+  }
   process.exit(1);
 });

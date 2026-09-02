@@ -48,8 +48,7 @@ pnpm run login
 Telegram sends a code to your other devices; the 2FA password is asked for
 separately and echoes as asterisks. This needs a real terminal: with no TTY it
 refuses immediately rather than hanging. The session lands in
-`data/telegram-session.txt` (mode `0600`) — copy it into
-`TELEGRAM_SESSION_STRING` and delete the file.
+`data/telegram-session.txt` and the bridge reads it from there. Nothing to copy.
 
 **3. Find out what to monitor**
 
@@ -341,6 +340,6 @@ before each publish and pauses when exhausted rather than failing the story.
 |---|---|
 | Container ends `ERROR` on every publish | `PUBLIC_BASE_URL` is not reachable from the internet. Fetch it from another network to check. |
 | `Instagram credentials rejected` at startup | Token expired or revoked — see [INSTAGRAM_SETUP.md](INSTAGRAM_SETUP.md). |
-| Prompts for a login code on every start | `TELEGRAM_SESSION_STRING` is not being persisted, or `./data` is not mounted. |
+| Startup fails with "Telegram session is missing or revoked" | The session was never authenticated, `./data` is not mounted, or it was revoked from **Settings → Devices**. Run `pnpm run login` again. |
 | Nothing is bridged, no errors | `TELEGRAM_MONITORED_PEERS` matches nothing. Run `pnpm run inspect`. |
 | A story was never published and never retried | Fixed: interrupted stories are recovered at startup. Older versions could leave one stuck. |

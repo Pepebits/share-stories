@@ -33,6 +33,8 @@ export interface MediaServerConfig {
   /** Public origin Meta will fetch from, e.g. https://stories.example.com */
   publicBaseUrl: string;
   ttlMs: number;
+  /** Backs /health. Omitted means always healthy. */
+  isHealthy?: () => boolean;
 }
 
 export interface HostedHandle {
@@ -138,8 +140,12 @@ export class MediaServer {
     // many items are hosted: whatever fronts this can be probed by anyone who
     // reaches it.
     if (path === '/health') {
-      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
-      res.end(req.method === 'HEAD' ? undefined : 'ok');
+      const healthy = this.config.isHealthy ? this.config.isHealthy() : true;
+      res.writeHead(healthy ? 200 : 503, {
+        'content-type': 'text/plain',
+        'cache-control': 'no-store',
+      });
+      res.end(req.method === 'HEAD' ? undefined : healthy ? 'ok' : 'unavailable');
       return;
     }
 

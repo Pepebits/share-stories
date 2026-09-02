@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { parseScopes, type StoryScope } from './telegram/scope.js';
+import { readSession } from './telegram/session.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -39,6 +40,8 @@ export interface TelegramConfig {
   apiHash: string;
   phoneNumber: string;
   sessionString: string;
+  /** Absolute path. `pnpm run login` writes here; the bridge reads it back. */
+  sessionFile: string;
   monitoredPeers: string[];
   /**
    * Which story audiences may be republished. Instagram publishes to every
@@ -75,7 +78,6 @@ export interface AppConfig {
   alertAfterFailures: number;
   databasePath: string;
   tempDir: string;
-  sessionFilePath: string;
   instagramTokenFile: string;
   logLevel: string;
   projectRoot: string;
@@ -86,7 +88,7 @@ export interface AppConfig {
  * loopback or private address means every publish will fail with an opaque
  * container ERROR, so fail loudly here instead.
  */
-function validatePublicBaseUrl(raw: string): string {
+export function validatePublicBaseUrl(raw: string): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -105,16 +107,31 @@ function validatePublicBaseUrl(raw: string): string {
   return url.origin;
 }
 
+function requireApiId(): number {
+  const raw = requireEnv('TELEGRAM_API_ID');
+  const apiId = Number(raw);
+  if (!Number.isInteger(apiId) || apiId <= 0) {
+    throw new Error(`TELEGRAM_API_ID must be a positive integer, got: ${raw}`);
+  }
+  return apiId;
+}
+
 export function loadConfig(): AppConfig {
   const publicBaseUrl = validatePublicBaseUrl(requireEnv('PUBLIC_BASE_URL'));
+  const sessionFile = resolve(
+    projectRoot,
+    optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt')
+  );
+  const sessionEnv = optionalEnv('TELEGRAM_SESSION_STRING');
 
   return {
     projectRoot,
     telegram: {
-      apiId: parseIntEnv('TELEGRAM_API_ID', 0),
+      apiId: requireApiId(),
       apiHash: requireEnv('TELEGRAM_API_HASH'),
       phoneNumber: requireEnv('TELEGRAM_PHONE_NUMBER'),
-      sessionString: optionalEnv('TELEGRAM_SESSION_STRING'),
+      sessionString: sessionEnv || readSession(sessionFile),
+      sessionFile,
       monitoredPeers: parseListEnv('TELEGRAM_MONITORED_PEERS'),
       allowedScopes: parseScopes(process.env.TELEGRAM_STORY_SCOPES),
     },
@@ -135,7 +152,6 @@ export function loadConfig(): AppConfig {
     alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3),
     databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
     tempDir: optionalEnv('TEMP_DIR', './data/temp'),
-    sessionFilePath: optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt'),
     instagramTokenFile: optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json'),
     logLevel: optionalEnv('LOG_LEVEL', 'info'),
   };

@@ -64,7 +64,7 @@ hold:
 
 | Secret | What it grants |
 |---|---|
-| `TELEGRAM_SESSION_STRING` / `data/telegram-session.txt` | **Full control of the Telegram account.** Read every private message, send messages as you. There is no read-only scope. |
+| `data/telegram-session.txt` (or `TELEGRAM_SESSION_STRING`) | **Full control of the Telegram account.** Read every private message, send messages as you. There is no read-only scope. |
 | `INSTAGRAM_ACCESS_TOKEN` / `data/instagram-token.json` | Publishing to that Instagram account |
 | `TELEGRAM_API_HASH` | Identifies your Telegram application |
 
@@ -197,7 +197,6 @@ revoked on both success and failure.
 - **Captions are dropped**: Instagram stories do not render the caption field.
 - **Media requirements**: Meta validates format server-side and a rejected file
   surfaces as a container `ERROR` with little detail.
-- **No alerting**: if the bridge stops publishing, only the logs will say so.
 - **One account per install**: there is no multi-tenancy, by design — see
   *Before you share this*.
 
