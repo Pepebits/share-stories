@@ -6,9 +6,11 @@
  *
  *   pnpm run inspect
  */
-import 'dotenv/config';
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import { loadDotEnv } from '../src/utils/env.js';
+
+loadDotEnv();
 
 const apiId = Number(process.env.TELEGRAM_API_ID ?? 0);
 const apiHash = process.env.TELEGRAM_API_HASH ?? '';

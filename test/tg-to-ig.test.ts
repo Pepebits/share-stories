@@ -22,7 +22,6 @@ describe('createTgToIgBridge', () => {
   const story = (id: string): StoryMedia => ({
     id,
     sourceUser: '@someone',
-    sourcePlatform: 'telegram',
     mediaType: 'photo',
     buffer: Buffer.from('bytes'),
     timestamp: 1_700_000_000,

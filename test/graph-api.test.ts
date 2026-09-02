@@ -25,7 +25,6 @@ function story(overrides: Partial<StoryMedia> = {}): StoryMedia {
   return {
     id: 'tg_story_1',
     sourceUser: '@somechannel',
-    sourcePlatform: 'telegram',
     mediaType: 'photo',
     buffer: photoBytes,
     timestamp: 1_700_000_000,

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Logger } from '../utils/logger.js';
+import { errorMessage } from '../utils/errors.js';
 import { InstagramPublishConfig } from './types.js';
 import { refreshAccessToken } from './graph-api.js';
 
@@ -81,7 +82,7 @@ export class TokenManager {
       if (code !== 'ENOENT') {
         this.logger.warn('Token file unreadable, falling back to the .env token', {
           path: this.options.filePath,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage(error),
         });
       }
     }
@@ -151,7 +152,7 @@ export class TokenManager {
       // Meta refuses to refresh a token younger than 24 hours. That is the
       // expected answer right after issuing one, not a fault.
       this.logger.warn('Instagram token refresh did not succeed; will retry', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
       return false;
     }
@@ -196,7 +197,7 @@ export class TokenManager {
       // refresh chain on the next restart.
       this.logger.error('Could not persist the refreshed Instagram token', {
         path,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
     }
   }

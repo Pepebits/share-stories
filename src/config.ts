@@ -1,10 +1,10 @@
-import dotenv from 'dotenv';
 import { parseScopes, type StoryScope } from './telegram/scope.js';
 import { readSession } from './telegram/session.js';
+import { loadDotEnv } from './utils/env.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-dotenv.config();
+loadDotEnv();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
@@ -77,11 +77,30 @@ export interface AppConfig {
    */
   alertAfterFailures: number;
   databasePath: string;
-  tempDir: string;
   instagramTokenFile: string;
   logLevel: string;
   projectRoot: string;
 }
+
+// Loopback, RFC 1918, link-local (169.254/16), carrier-grade NAT (100.64/10),
+// and the IPv6 equivalents (::1, fc00::/7, fe80::/10) — none of these resolve
+// for Meta.
+const UNREACHABLE_HOST = new RegExp(
+  '^(' +
+    [
+      'localhost',
+      '127\\.',
+      '0\\.0\\.0\\.0',
+      '10\\.',
+      '192\\.168\\.',
+      '172\\.(1[6-9]|2\\d|3[01])\\.',
+      '169\\.254\\.',
+      '100\\.(6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.',
+      '\\[?(::1|f[cd][0-9a-f]{2}:|fe80:)',
+    ].join('|') +
+    ')',
+  'i'
+);
 
 /**
  * Meta fetches story media from PUBLIC_BASE_URL over the open internet. A
@@ -96,8 +115,7 @@ export function validatePublicBaseUrl(raw: string): string {
     throw new Error(`PUBLIC_BASE_URL is not a valid URL: ${raw}`);
   }
 
-  const unreachable = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1)/i;
-  if (unreachable.test(url.hostname) || unreachable.test(url.host)) {
+  if (UNREACHABLE_HOST.test(url.hostname) || UNREACHABLE_HOST.test(url.host)) {
     throw new Error(
       `PUBLIC_BASE_URL points at ${url.hostname}, which Instagram cannot reach. ` +
         'It must be a public address or hostname, typically a reverse proxy in front of this process.'
@@ -151,7 +169,6 @@ export function loadConfig(): AppConfig {
     pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120),
     alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3),
     databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
-    tempDir: optionalEnv('TEMP_DIR', './data/temp'),
     instagramTokenFile: optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json'),
     logLevel: optionalEnv('LOG_LEVEL', 'info'),
   };

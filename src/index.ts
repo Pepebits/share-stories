@@ -9,16 +9,13 @@ import { TokenManager, DEFAULT_TOKEN_OPTIONS } from './instagram/token-manager.j
 import { QuotaGuard } from './instagram/quota.js';
 import { MediaServer } from './http/media-server.js';
 import { createTgToIgBridge } from './bridge/tg-to-ig.js';
-import { cleanupTempDir, ensureTempDir } from './bridge/media.js';
 
-const TEMP_FILE_MAX_AGE_MS = 60 * 60_000;
 const MAINTENANCE_INTERVAL_MS = 30 * 60_000;
 const STORY_HISTORY_DAYS = 30;
 
 async function main(): Promise<void> {
   console.log('╔══════════════════════════════════════════╗');
-  console.log('║     Share Historys — Story Bridge        ║');
-  console.log('║  Telegram → Instagram (official API)     ║');
+  console.log('║   share-stories — Telegram → Instagram   ║');
   console.log('╚══════════════════════════════════════════╝');
   console.log();
 
@@ -35,10 +32,7 @@ async function main(): Promise<void> {
     logger.warn(`Recovered ${stalled} story(ies) interrupted by a previous run; they will retry.`);
   }
 
-  await ensureTempDir(config.tempDir);
-
   const runMaintenance = () => {
-    void cleanupTempDir(config.tempDir, TEMP_FILE_MAX_AGE_MS, logger);
     const removed = store.cleanup(STORY_HISTORY_DAYS);
     if (removed > 0) logger.debug(`Purged ${removed} story record(s) older than ${STORY_HISTORY_DAYS} days`);
   };
@@ -77,7 +71,6 @@ async function main(): Promise<void> {
       apiHash: config.telegram.apiHash,
       phoneNumber: config.telegram.phoneNumber,
       sessionString: config.telegram.sessionString,
-      tempDir: config.tempDir,
       allowedScopes: config.telegram.allowedScopes,
     },
     logger

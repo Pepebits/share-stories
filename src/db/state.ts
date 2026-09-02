@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export type Platform = 'telegram' | 'instagram';
@@ -52,10 +52,7 @@ export class StateStore {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    const dir = dirname(dbPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
+    mkdirSync(dirname(dbPath), { recursive: true });
 
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');

@@ -18,9 +18,24 @@ describe('validatePublicBaseUrl', () => {
     'http://192.168.1.1',
     'http://172.16.0.1',
     'http://[::1]',
+    'http://169.254.1.1',
+    'http://100.64.0.1',
+    'http://[fc00::1]',
+    'http://[fe80::1]',
   ]) {
     it(`rejects ${unreachable}`, () => {
       assert.throws(() => validatePublicBaseUrl(unreachable), /cannot reach/);
+    });
+  }
+
+  for (const reachable of [
+    'http://100.63.0.1',
+    'http://100.128.0.1',
+    'https://fdstories.example.com',
+    'https://fcbarcelona.com',
+  ]) {
+    it(`accepts ${reachable}`, () => {
+      assert.equal(validatePublicBaseUrl(reachable), reachable);
     });
   }
 });

@@ -8,8 +8,7 @@ import { Logger } from '../utils/logger.js';
  * story at a single-use, unguessable URL that stops resolving as soon as the
  * story is published (or the TTL lapses).
  *
- * Media is held in memory rather than served from disk, so there is no path
- * that can be traversed into TEMP_DIR.
+ * Media is served from memory, so there is no path to traverse.
  */
 
 const EXTENSIONS = { photo: 'jpg', video: 'mp4' } as const;

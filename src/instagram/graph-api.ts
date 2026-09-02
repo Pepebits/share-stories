@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { Logger } from '../utils/logger.js';
+import { errorMessage } from '../utils/errors.js';
 import { StoryMedia } from '../telegram/types.js';
 import { InstagramPublishConfig, PublishTiming } from './types.js';
 import { MediaServer } from '../http/media-server.js';
@@ -79,7 +80,7 @@ function describeError(error: unknown): string {
     }
     return error.message;
   }
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
 
 /**

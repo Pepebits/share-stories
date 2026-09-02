@@ -65,7 +65,6 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 | `INSTAGRAM_QUOTA_REFRESH_SECONDS` | `600` | How long a quota reading is trusted |
 | `INSTAGRAM_TOKEN_FILE` | `./data/instagram-token.json` | Where the rotating token is stored |
 | `DATABASE_PATH` | `./data/state.db` | Deduplication database |
-| `TEMP_DIR` | `./data/temp` | Scratch space for downloads |
 | `LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug` |
 
 ## The volume matters
