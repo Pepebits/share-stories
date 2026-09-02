@@ -33,10 +33,11 @@ describe('createTgToIgBridge', () => {
     const alerts: string[] = [];
 
     const reader: StorySource = {
-      getStoriesForPeers: (_peers, isWanted = () => true) => {
+      stories: async function* (_peers, isWanted = () => true) {
+        await Promise.resolve();
         const allowed = available.filter((id) => isWanted(id));
         asked.push(allowed);
-        return Promise.resolve(allowed.map(story));
+        for (const id of allowed) yield story(id);
       },
       notifySelf: (text) => {
         alerts.push(text);
@@ -84,7 +85,7 @@ describe('createTgToIgBridge', () => {
     bridge.start();
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    bridge.stop();
+    await bridge.stop();
   };
 
   beforeEach(async () => {
@@ -142,7 +143,7 @@ describe('createTgToIgBridge', () => {
     }
 
     assert.equal(
-      store.retryState('peer:1', 'telegram', 'instagram'),
+      store.attemptState('peer:1', 'telegram', 'instagram'),
       'exhausted',
       'the story should be written off'
     );
@@ -237,11 +238,87 @@ describe('createTgToIgBridge', () => {
     });
   });
 
+  describe('story ordering', () => {
+    // publishStory is not injectable, so completion is observed the same way
+    // production would notice it: a row exists once an attempt has been made.
+    // (attemptState() is not useable here — the first failure's backoff is 0
+    // minutes, so it reads 'ready' both before the attempt and right after.)
+    it('publishes a story before asking the reader for the next one', async () => {
+      const order: string[] = [];
+      const reader: StorySource = {
+        stories: async function* () {
+          order.push('yield 1');
+          yield story('peer:1');
+          order.push((await attemptsFor('peer:1')) > 0 ? 'publish 1' : 'no publish 1');
+          order.push('yield 2');
+          yield story('peer:2');
+        },
+        notifySelf: async () => {},
+        isConnected: () => true,
+        reconnect: async () => {},
+      };
+
+      await pollOnce(bridgeOver(reader));
+
+      assert.deepEqual(order, ['yield 1', 'publish 1', 'yield 2']);
+    });
+  });
+
+  describe('stop', () => {
+    // A for-await break calls the generator's return(), which unwinds it
+    // without running code placed after the yield — so completion is read
+    // from wall-clock time and the state store, not from a flag in the stub.
+    it('waits for the in-flight cycle, and publishes nothing past it', async () => {
+      const reader: StorySource = {
+        stories: async function* () {
+          yield story('peer:1');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          yield story('peer:2');
+        },
+        notifySelf: async () => {},
+        isConnected: () => true,
+        reconnect: async () => {},
+      };
+
+      const bridge = bridgeOver(reader);
+      bridge.start();
+
+      // Long enough for the first story to be published, well short of the
+      // 50ms the stub waits before offering the second.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const before = Date.now();
+      await bridge.stop();
+
+      assert.ok(
+        Date.now() - before >= 30,
+        'stop() must wait out the in-flight cycle rather than return early'
+      );
+      assert.ok((await attemptsFor('peer:1')) > 0, 'the story already in flight must be attempted');
+      assert.equal(
+        await attemptsFor('peer:2'),
+        0,
+        'a story offered after running went false must not be attempted'
+      );
+    });
+  });
+
   /** Pulls every failure timestamp back so the next cycle is due immediately. */
   async function rewindBackoff() {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(join(dir, 'state.db'));
     db.exec(`UPDATE stories SET processed_at = datetime('now', '-500 minutes')`);
     db.close();
+  }
+
+  /** How many attempts the store has recorded for a story, 0 if it was never touched. */
+  async function attemptsFor(id: string): Promise<number> {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(join(dir, 'state.db'));
+    const row = db.prepare('SELECT attempts FROM stories WHERE story_id = ?').get(id) as
+      | { attempts?: number }
+      | undefined;
+    db.close();
+    return row?.attempts ?? 0;
   }
 });

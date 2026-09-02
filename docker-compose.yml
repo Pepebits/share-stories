@@ -15,6 +15,9 @@ services:
     # Reaps zombies and forwards signals, so `docker stop` shuts down cleanly
     # instead of waiting out the timeout.
     init: true
+    # Publishing a video can outlast the default 10s, and stop() waits for
+    # the in-flight cycle to finish before the process exits.
+    stop_grace_period: 90s
     env_file: .env
     environment:
       # Must bind all interfaces: loopback is unreachable from another

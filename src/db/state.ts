@@ -6,8 +6,8 @@ export type Platform = 'telegram' | 'instagram';
 
 export type StoryStatus = 'processing' | 'posted' | 'failed';
 
-/** Whether a previously failed story is due for another try. */
-export type RetryState = 'ready' | 'waiting' | 'exhausted';
+/** 'ready' covers both an unseen story and a failure whose backoff has elapsed. */
+export type AttemptState = 'ready' | 'done' | 'waiting' | 'exhausted';
 
 /**
  * Minutes to wait after the Nth failure before trying again — the first entry
@@ -92,29 +92,27 @@ export class StateStore {
   }
 
   /**
-   * Whether a failed story is due for another attempt.
+   * Whether a story is worth spending an attempt on right now.
    *
-   * 'ready' for anything not currently in a failed state, so an unseen story
-   * is always worth trying. Retrying regardless of this is what turned ten
-   * stories into 1,563 failed publishes and some 4,700 requests to Meta.
+   * No row means it has never been seen, so 'ready'. 'posted' or 'processing'
+   * is 'done' — a transient rejection is deliberately not in that set, since
+   * it should be retried rather than written off. A 'failed' row applies the
+   * backoff: retrying regardless of it is what turned ten stories into 1,563
+   * failed publishes and some 4,700 requests to Meta.
    */
-  retryState(
-    storyId: string,
-    sourcePlatform: Platform,
-    targetPlatform: Platform
-  ): RetryState {
+  attemptState(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): AttemptState {
     const row = this.db
       .prepare(
-        `SELECT attempts, processed_at FROM stories
+        `SELECT status, attempts, processed_at FROM stories
          WHERE story_id = ? AND platform = ? AND target_platform = ?
-           AND status = 'failed'
          LIMIT 1`
       )
       .get(storyId, sourcePlatform, targetPlatform) as
-      | { attempts?: number; processed_at?: string | null }
+      | { status: StoryStatus; attempts?: number; processed_at?: string | null }
       | undefined;
 
     if (!row) return 'ready';
+    if (row.status === 'posted' || row.status === 'processing') return 'done';
 
     const attempts = Number(row.attempts ?? 0);
     if (attempts >= MAX_ATTEMPTS) return 'exhausted';
@@ -130,25 +128,6 @@ export class StateStore {
     return Date.now() >= failedAt + waitMinutes * 60_000 ? 'ready' : 'waiting';
   }
 
-  /**
-   * True once a story is published or currently being published.
-   *
-   * 'failed' is deliberately absent: a transient rejection should be retried
-   * on the next cycle rather than written off.
-   */
-  isProcessed(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): boolean {
-    const row = this.db
-      .prepare(
-        `SELECT 1 FROM stories
-         WHERE story_id = ? AND platform = ? AND target_platform = ?
-           AND status IN ('posted', 'processing')
-         LIMIT 1`
-      )
-      .get(storyId, sourcePlatform, targetPlatform);
-
-    return row !== undefined;
-  }
-
   markProcessing(
     storyId: string,
     sourcePlatform: Platform,
@@ -157,7 +136,7 @@ export class StateStore {
   ): void {
     // Retrying a previously failed story has to move it back to 'processing';
     // INSERT OR IGNORE would leave it marked 'failed' for the whole attempt,
-    // so isProcessed() would not protect it.
+    // so attemptState() would not protect it.
     this.db
       .prepare(
         `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
@@ -200,7 +179,7 @@ export class StateStore {
    *
    * 'processing' is set before the upload starts, and publishing a video can
    * take a minute. If the process dies in that window the row keeps blocking
-   * isProcessed() forever, and that story is never retried. Only one process
+   * attemptState() forever, and that story is never retried. Only one process
    * owns this database, so nothing can legitimately be in flight at startup.
    *
    * Returns how many rows were recovered.

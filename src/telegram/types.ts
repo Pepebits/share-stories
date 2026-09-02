@@ -14,10 +14,8 @@ export interface StoryMedia {
 
 /** What the bridge needs from a story source, independent of GramJS. */
 export interface StorySource {
-  getStoriesForPeers(
-    peers: string[],
-    isWanted: (storyId: string) => boolean
-  ): Promise<StoryMedia[]>;
+  /** Yields each story as soon as it is downloaded, so the bridge can publish while more arrive. */
+  stories(peers: string[], isWanted: (storyId: string) => boolean): AsyncIterable<StoryMedia>;
   notifySelf(text: string): Promise<void>;
   isConnected(): boolean;
   reconnect(): Promise<void>;
