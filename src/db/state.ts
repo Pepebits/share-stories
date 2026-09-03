@@ -10,15 +10,9 @@ export type StoryStatus = 'processing' | 'posted' | 'failed';
 export type AttemptState = 'ready' | 'done' | 'waiting' | 'exhausted';
 
 /**
- * Minutes to wait after the Nth failure before trying again — the first entry
- * applies after one failure, so a single blip comes straight back around.
- *
- * A flat cap is a trap at a two-minute poll: five straight attempts would be
- * spent in ten minutes, so an outage affecting every story — an expired token,
- * an unreachable media server — would write off a whole day of stories before
- * anyone could react. Stretched this way the fifth attempt lands about two
- * hours after the first, which still kills the retry storm but survives
- * something transient.
+ * Minutes to wait after the Nth failure before trying again. A flat cap would
+ * burn through every attempt within minutes at a two-minute poll, writing off
+ * a whole day of stories during an outage; stretching it out survives that.
  */
 const RETRY_BACKOFF_MINUTES = [0, 5, 20, 90];
 
@@ -39,14 +33,12 @@ export interface StoredStory {
 }
 
 /**
- * Remembers which stories have already been bridged.
+ * Remembers which stories have already been bridged, so a story that stays
+ * visible for 24h and gets polled repeatedly is published exactly once.
  *
- * A story stays visible for 24h, so a two-minute poll sees the same one some
- * 700 times. Everything here exists to make sure it is published exactly once.
- *
- * Uses Node's built-in SQLite rather than a native module: better-sqlite3 has
- * to be compiled whenever no prebuild matches the running ABI, which turns
- * every Node upgrade into a build problem.
+ * Uses Node's built-in SQLite rather than a native module: better-sqlite3
+ * needs compiling whenever no prebuild matches the running ABI, turning every
+ * Node upgrade into a build problem.
  */
 export class StateStore {
   private readonly db: DatabaseSync;
@@ -83,8 +75,8 @@ export class StateStore {
         ON stories(status);
     `);
 
-    // CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so a
-    // database created before the retry cap needs the column added by hand.
+    // CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so a database from
+    // before the retry cap needs this column added by hand.
     const columns = this.db.prepare('PRAGMA table_info(stories)').all() as { name: string }[];
     if (!columns.some((column) => column.name === 'attempts')) {
       this.db.exec('ALTER TABLE stories ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
@@ -92,13 +84,10 @@ export class StateStore {
   }
 
   /**
-   * Whether a story is worth spending an attempt on right now.
-   *
-   * No row means it has never been seen, so 'ready'. 'posted' or 'processing'
-   * is 'done' — a transient rejection is deliberately not in that set, since
-   * it should be retried rather than written off. A 'failed' row applies the
-   * backoff: retrying regardless of it is what turned ten stories into 1,563
-   * failed publishes and some 4,700 requests to Meta.
+   * Whether a story is worth spending an attempt on right now. No row means
+   * 'ready'; 'posted' or 'processing' is 'done'. A 'failed' row applies the
+   * backoff — retrying regardless of it is what once turned a handful of
+   * stories into a flood of failed publishes against Meta.
    */
   attemptState(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): AttemptState {
     const row = this.db
@@ -134,9 +123,8 @@ export class StateStore {
     sourceUser: string,
     targetPlatform: Platform
   ): void {
-    // Retrying a previously failed story has to move it back to 'processing';
-    // INSERT OR IGNORE would leave it marked 'failed' for the whole attempt,
-    // so attemptState() would not protect it.
+    // Must move a retried story back to 'processing'; INSERT OR IGNORE would leave it
+    // 'failed' for the whole attempt, so attemptState() would not protect it.
     this.db
       .prepare(
         `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
@@ -175,14 +163,9 @@ export class StateStore {
   }
 
   /**
-   * Clears rows left mid-publish by a crash or a kill.
-   *
-   * 'processing' is set before the upload starts, and publishing a video can
-   * take a minute. If the process dies in that window the row keeps blocking
-   * attemptState() forever, and that story is never retried. Only one process
-   * owns this database, so nothing can legitimately be in flight at startup.
-   *
-   * Returns how many rows were recovered.
+   * Clears rows left mid-publish by a crash or kill. 'processing' is set
+   * before the upload starts, so a process dying in that window would block
+   * attemptState() on that story forever; only one process owns this database.
    */
   recoverStalled(): number {
     return this.db

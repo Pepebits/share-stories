@@ -23,14 +23,9 @@ import { prompt, isInteractive } from '../utils/prompt.js';
 export class TelegramSessionError extends Error {}
 
 /**
- * Reads active Telegram stories over MTProto.
- *
- * This needs a user account session, which is an unscoped credential for that
- * whole account — acceptable for your own machine, not for holding on behalf
- * of others. The Bot API is no substitute: it cannot see stories at all.
- *
- * The API surface here is untyped in GramJS, so the shapes below were taken
- * from live responses rather than from declarations.
+ * Reads active Telegram stories over MTProto with a user-account session — an unscoped
+ * credential for the whole account, but the Bot API cannot see stories at all. GramJS leaves
+ * this surface untyped, so the shapes in feed.ts were taken from live responses.
  */
 
 export interface TelegramReaderConfig {
@@ -57,10 +52,9 @@ export class TelegramStoryReader implements StorySource {
   ) {}
 
   /**
-   * Connects with an existing session, for unattended starts. Never calls
-   * client.start(): with a revoked session that sends a login code to the
-   * account's other devices before checking anything, then loops in
-   * signInUser (telegram/client/auth.js) until onError returns true.
+   * Connects with an existing session; never calls client.start(), which on a
+   * revoked session sends a login code to the account's other devices and
+   * loops in signInUser (telegram/client/auth.js) until onError returns true.
    */
   async connect(): Promise<string> {
     this.client = new TelegramClient(
@@ -102,15 +96,13 @@ export class TelegramStoryReader implements StorySource {
 
     await this.client.start({
       phoneNumber: this.config.phoneNumber,
-      // Telegram sends these to the account's other devices when the session
-      // is absent or stale. Without a terminal, prompt() refuses rather than
-      // blocking on a stdin that will never deliver.
+      // Telegram sends these to the account's other devices when the session is stale;
+      // without a terminal, prompt() refuses rather than blocking on stdin forever.
       phoneCode: () => prompt('Telegram login code: '),
       password: () => prompt('Telegram 2FA password: ', true),
       onError: (error: Error): Promise<boolean> => {
         this.logger.error('GramJS connection error', { error: error.message });
-        // At a terminal GramJS asks again; without one there is nobody to ask,
-        // so returning true makes it stop instead of looping.
+        // At a terminal GramJS asks again; without one, returning true stops it instead of looping.
         return Promise.resolve(!isInteractive());
       },
     });
@@ -133,15 +125,9 @@ export class TelegramStoryReader implements StorySource {
   }
 
   /**
-   * Active stories from the given peers, which may be named by any active
-   * username, by title, or by numeric id — private channels have nothing else.
-   * Yields each story as soon as its media is downloaded.
-   *
-   * `isWanted` decides which stories are worth the bandwidth, and is asked
-   * before anything is resolved or downloaded. Without it every active story
-   * would be re-fetched on every poll — a story stays visible for 24h, so that
-   * is some 700 downloads of the same video — and the caller would then throw
-   * away all but the handful it had not already published.
+   * Active stories for the given peers, named by username, title, or id. `isWanted` filters
+   * before anything is downloaded — a story stays visible 24h, so without it every poll
+   * would re-fetch it.
    */
   async *stories(
     peers: string[],
@@ -183,8 +169,8 @@ export class TelegramStoryReader implements StorySource {
         continue;
       }
 
-      // Asked before resolveSkipped, so an already-published story costs
-      // neither a GetStoriesByID nor a download.
+      // Asked before resolveSkipped, so an already-published story costs neither a fetch nor
+      // a download.
       const pending = (entry.stories ?? []).filter(
         (story) => story.id !== undefined && isWanted(`${peerId}:${story.id}`)
       );
@@ -210,13 +196,9 @@ export class TelegramStoryReader implements StorySource {
   }
 
   /**
-   * Replaces the placeholders GetAllStories returns with the real thing.
-   *
-   * Only the newest few stories arrive whole; the rest are StoryItemSkipped,
-   * carrying no media at all. downloadMedia does not fail on one — it resolves
-   * to an empty buffer — so without this every story but the newest handful
-   * reaches Instagram as a zero-byte file, and Meta answers those with an
-   * opaque 500. Fetching them by id is what Telegram expects a client to do.
+   * Replaces StoryItemSkipped placeholders with the real story. downloadMedia
+   * doesn't fail on one — it resolves to an empty buffer — so without this
+   * every skipped story would reach Instagram as a zero-byte file.
    */
   private async resolveSkipped(
     peer: PeerStories['peer'],
@@ -250,8 +232,8 @@ export class TelegramStoryReader implements StorySource {
 
       return stories.map((story) => resolved.get(story.id) ?? story);
     } catch (error) {
-      // Leaving them unresolved is safe: they keep their placeholder className,
-      // which toStoryMedia drops before anything is downloaded.
+      // Leaving them unresolved is safe: toStoryMedia drops the placeholder className before
+      // downloading anything.
       this.logger.warn('Could not resolve skipped stories; they are ignored this cycle', {
         peer: peerLabel,
         count: skipped.length,
@@ -268,8 +250,7 @@ export class TelegramStoryReader implements StorySource {
   ): Promise<StoryMedia | null> {
     if (!this.client || story.id === undefined) return null;
 
-    // Anything still not a full StoryItem could not be resolved above, and has
-    // no media to download.
+    // Anything still not a full StoryItem could not be resolved above, and has no media.
     if (story.className && story.className !== 'StoryItem') {
       this.logger.debug('Skipping story that carries no media', {
         storyId: `${peerId}:${story.id}`,
@@ -278,15 +259,13 @@ export class TelegramStoryReader implements StorySource {
       return null;
     }
 
-    // Story ids restart per peer — two channels can both own story 3 — and the
-    // state store dedupes on this across every peer, so it must be qualified
-    // or one of the two would silently never be published.
+    // Story ids restart per peer, and the state store dedupes across every peer, so this must
+    // be qualified with the peer id or two identically-numbered stories would never both publish.
     const storyId = `${peerId}:${story.id}`;
 
-    // Instagram cannot publish to a restricted audience, so a story meant for
-    // close friends arrives there in front of every follower. Declining to
-    // carry it is the only way to honour the author's intent — which is what
-    // TELEGRAM_STORY_SCOPES is for, though it permits everything by default.
+    // Instagram cannot publish to a restricted audience — a close-friends story would arrive in
+    // front of every follower. Declining it is the only way to honour the author's intent;
+    // TELEGRAM_STORY_SCOPES decides which audiences are carried.
     const scope = storyScope(story);
     if (!isAllowed(scope, this.config.allowedScopes)) {
       this.logger.info('Skipping story: its audience does not survive the crossing', {
@@ -297,15 +276,14 @@ export class TelegramStoryReader implements StorySource {
       return null;
     }
 
-    // Forwarding disabled is the author saying this should not travel. It is
-    // a weaker signal than the audience flags, but it points the same way.
+    // Forwarding disabled is a weaker signal than the audience flags, but it points the same way.
     if (story.noforwards) {
       this.logger.info('Skipping story: the author disabled forwarding', { storyId });
       return null;
     }
 
-    // Telegram states the size and duration up front, so a story Instagram
-    // would refuse can be dropped without spending the download on it.
+    // Telegram states the size and duration up front, so a story Instagram would refuse can be
+    // dropped before downloading it.
     const facts = describeTelegramMedia(story.media);
     const refusal = rejectionReason(facts);
     if (refusal) {
@@ -322,8 +300,8 @@ export class TelegramStoryReader implements StorySource {
     return {
       id: storyId,
       sourceUser: peerLabel,
-      // Telegram delivers photos and videos alike as documents, so the bytes
-      // are the only reliable signal of which this actually is.
+      // Telegram delivers photos and videos alike as documents, so the bytes are the only
+      // reliable signal of which this is.
       mediaType: isVideoBuffer(buffer) ? 'video' : 'photo',
       buffer,
       durationSeconds: facts.durationSeconds,
@@ -333,17 +311,15 @@ export class TelegramStoryReader implements StorySource {
   }
 
   /**
-   * downloadMedia returns either a Buffer or a path, depending on size and
-   * options, so both have to be handled. The story itself is tried as a
-   * fallback because some story types carry the file outside `media`.
+   * downloadMedia returns a Buffer or a path depending on size, so both are handled;
+   * the story itself is a fallback since some types carry the file outside `media`.
    */
   private async download(story: RawStory, storyId: string): Promise<Buffer | null> {
     const client = this.client;
     if (!client) return null;
 
-    // An empty result means "nothing to download", but Buffer.alloc(0) is
-    // truthy, so returning it as-is would satisfy every caller's `if (buffer)`
-    // and defeat the fallback below. Normalise it to null instead.
+    // Buffer.alloc(0) is truthy, so an empty download is normalised to null here —
+    // otherwise it would satisfy every caller's `if (buffer)` and defeat the fallback below.
     const notEmpty = (buffer: Buffer): Buffer | null => (buffer.length > 0 ? buffer : null);
 
     const attempt = async (target: unknown): Promise<Buffer | null> => {
@@ -366,12 +342,8 @@ export class TelegramStoryReader implements StorySource {
   }
 
   /**
-   * Writes a note to the account's own Saved Messages.
-   *
-   * This runs unattended, and the last failure went unnoticed for eleven days
-   * because nothing but the log ever said anything. Telegram is the one
-   * channel already authenticated here and already on the operator's phone,
-   * so it costs no new credential and no new service.
+   * Alerts to the account's own Saved Messages: this runs unattended, and a failure
+   * only the log records goes unnoticed. Telegram is already authenticated here.
    */
   async notifySelf(text: string): Promise<void> {
     if (!this.client) return;
@@ -380,8 +352,7 @@ export class TelegramStoryReader implements StorySource {
       await this.client.sendMessage('me', { message: text });
       this.logger.debug('Alert sent to Saved Messages');
     } catch (error) {
-      // An alert that cannot be delivered must not take down the bridge that
-      // was trying to report it.
+      // An alert that cannot be delivered must not take down the bridge trying to report it.
       this.logger.warn('Could not deliver the alert to Saved Messages', {
         error: errorMessage(error),
       });

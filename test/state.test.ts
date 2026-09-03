@@ -6,10 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
 
-/**
- * A story stays visible for 24h, so a two-minute poll sees the same one some
- * 700 times. Everything here guards the "publish exactly once" property.
- */
+/** A story stays visible for 24h and many polls see it; everything here guards "publish once". */
 describe('StateStore', () => {
   let dir: string;
   let store: StateStore;
@@ -98,11 +95,8 @@ describe('StateStore', () => {
     });
   });
 
-  /**
-   * Ten stories that could never succeed were retried 1,563 times over eleven
-   * days, three requests to Meta apiece. The cap stops that; the backoff keeps
-   * the cap from writing off a whole day of stories during a brief outage.
-   */
+  // The cap stops a hopeless story being retried forever; the backoff keeps the cap from
+  // writing off a whole day of stories during a brief outage.
   describe('retry cap', () => {
     const retry = () => store.attemptState('peer:1', 'telegram', 'instagram');
 
@@ -194,10 +188,8 @@ describe('StateStore', () => {
       assert.equal(retry(), 'exhausted');
     });
 
-    // A posted story reports 'done', which is not itself proof the counter was
-    // cleared — so this drives it right up to the edge of exhaustion, posts,
-    // and checks that a single fresh failure lands at 'ready' rather than
-    // 'exhausted', which only happens if the old count was carried forward.
+    // 'done' is no proof the counter was cleared, so this posts at the edge of exhaustion and
+    // checks that one fresh failure lands at 'ready' rather than 'exhausted'.
     it('wipes the slate once a story finally publishes', () => {
       for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
         start('peer:1');

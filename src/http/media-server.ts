@@ -5,10 +5,9 @@ import { Logger } from '../utils/logger.js';
 /**
  * Meta's Content Publishing API does not accept file uploads: it fetches the
  * media itself over HTTP from a URL you provide. This server exposes each
- * story at a single-use, unguessable URL that stops resolving as soon as the
- * story is published (or the TTL lapses).
- *
- * Media is served from memory, so there is no path to traverse.
+ * story at a single-use, unguessable URL that stops resolving once the story
+ * is published (or the TTL lapses). Media is served from memory, so there is
+ * no path to traverse.
  */
 
 const EXTENSIONS = { photo: 'jpg', video: 'mp4' } as const;
@@ -135,9 +134,8 @@ export class MediaServer {
 
     const path = (req.url ?? '').split('?')[0];
 
-    // Liveness only. Deliberately says nothing about stories, tokens or how
-    // many items are hosted: whatever fronts this can be probed by anyone who
-    // reaches it.
+    // Liveness only — deliberately says nothing about stories, tokens, or how many items
+    // are hosted, since whatever fronts this can be probed by anyone who reaches it.
     if (path === '/health') {
       const healthy = this.config.isHealthy ? this.config.isHealthy() : true;
       res.writeHead(healthy ? 200 : 503, {

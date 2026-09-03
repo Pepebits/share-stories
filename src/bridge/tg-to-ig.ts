@@ -15,15 +15,13 @@ export interface TgToIgConfig {
   monitoredPeers: string[];
   quota: QuotaGuard;
   /**
-   * Resolved per publish rather than captured once: the access token is
-   * rotated in the background by TokenManager, and a captured copy would go
-   * stale 60 days in without anything failing loudly.
+   * Resolved per publish, not captured once: TokenManager rotates the token in the
+   * background, and a captured copy would go stale 60 days in without failing loudly.
    */
   instagram: () => InstagramPublishConfig;
   /**
-   * Consecutive publish failures before the account is messaged. 0 disables
-   * it. Counted across cycles, because the failure worth hearing about is the
-   * one that keeps happening, not the one that resolves itself.
+   * Consecutive publish failures before the account is messaged (0 disables it),
+   * counted across cycles so a self-resolving blip does not trigger it.
    */
   alertAfterFailures: number;
   /** Called once reconnecting has failed MAX_RECONNECT_FAILURES times in a row. */
@@ -46,20 +44,13 @@ export function createTgToIgBridge(
   let running = false;
   let consecutiveFailures = 0;
   let reconnectFailures = 0;
-  // Edge-triggered: one message when things break, one when they come back,
-  // and silence in between. A per-failure alert during an outage would be
-  // noise, and noise is what stops being read.
+  // Edge-triggered: one message when things break, one when they recover, silence in between.
   let alerted = false;
-  // Publishing a video can outlast the poll interval; without this guard the
-  // next tick would re-read the same stories and double-post them. Also
-  // tracked as a promise so stop() can await the cycle already in flight.
+  // Guards against a poll tick overlapping a publish that outlasts the interval.
   let polling = false;
   let current: Promise<void> = Promise.resolve();
 
-  /**
-   * Whether a story is worth spending anything on right now — never published,
-   * and not a failure that is waiting out its backoff or has been written off.
-   */
+  // Never published, and not a failure waiting out its backoff or written off.
   const worthAttempting = (storyId: string): boolean =>
     store.attemptState(storyId, 'telegram', 'instagram') === 'ready';
 
@@ -90,9 +81,7 @@ export function createTgToIgBridge(
         permanent: error instanceof PermanentError,
       });
 
-      // Said once, when it happens — the alternative is silence, and a story
-      // that quietly stops being attempted is the kind of thing you find out
-      // about days later.
+      // Logged once, so a story that quietly stops being attempted doesn't go unnoticed.
       if (store.attemptState(story.id, 'telegram', 'instagram') === 'exhausted') {
         logger.warn('Giving up on this story until it expires', {
           storyId: story.id,
@@ -138,19 +127,17 @@ export function createTgToIgBridge(
         }
       }
 
-      // The reader downloads whatever it yields, so the "have we settled this
-      // already?" question has to be answered before it fetches, not after.
+      // The reader downloads whatever it yields, so "have we settled this already?" must be
+      // answered before it fetches, not after.
       for await (const story of reader.stories(config.monitoredPeers, worthAttempting)) {
         if (!running) break;
 
-        // Asked again because a peer's pending stories are all chosen before
-        // any of them is downloaded, and publishing a video can take a while.
+        // Asked again since a peer's pending stories are all chosen before any download starts.
         if (!worthAttempting(story.id)) continue;
 
         try {
-          // Checked before the story is touched: exceeding the quota is a
-          // "come back later", not a failure, so the story must stay
-          // unprocessed and be picked up again on a later cycle.
+          // Checked before the story is touched: exceeding the quota is a "come back later",
+          // not a failure, so the story must stay unprocessed for a later cycle.
           await config.quota.ensureCapacity();
         } catch (error) {
           if (error instanceof QuotaExceededError) {
@@ -169,8 +156,7 @@ export function createTgToIgBridge(
     }
   };
 
-  // Only assigns `current` when a cycle actually starts, so stop() never
-  // ends up awaiting an already-resolved no-op instead of the real one.
+  // Only assigns `current` when a cycle actually starts, so stop() awaits the real one.
   const triggerPoll = () => {
     if (running && !polling) current = poll();
   };

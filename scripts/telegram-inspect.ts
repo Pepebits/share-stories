@@ -1,8 +1,7 @@
 /**
  * Shows what the authenticated account can actually see, so TELEGRAM_MONITORED_PEERS
- * can be filled in from evidence rather than guesswork.
- *
- * Read-only: it publishes nothing and downloads no media.
+ * can be filled in from evidence rather than guesswork. Read-only: publishes nothing,
+ * downloads no media.
  *
  *   pnpm run inspect
  */

@@ -25,8 +25,7 @@ async function main(): Promise<void> {
   const store = new StateStore(config.databasePath);
   logger.info('State store initialized', { dbPath: config.databasePath });
 
-  // Only one process owns this database, so anything still marked in-flight
-  // is the residue of a crash. Left alone it would block that story forever.
+  // Only one process owns this database, so anything still marked in-flight is crash residue.
   const stalled = store.recoverStalled();
   if (stalled > 0) {
     logger.warn(`Recovered ${stalled} story(ies) interrupted by a previous run; they will retry.`);
@@ -39,8 +38,8 @@ async function main(): Promise<void> {
   runMaintenance();
   const maintenanceInterval = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
 
-  // Long-lived tokens expire after 60 days, so the running token is whatever
-  // the last refresh produced — not necessarily what is sitting in .env.
+  // Long-lived tokens expire after 60 days, so the running token is whatever the last
+  // refresh produced, not necessarily what is in .env.
   const tokens = new TokenManager(
     {
       filePath: resolve(config.projectRoot, config.instagramTokenFile),
@@ -54,8 +53,7 @@ async function main(): Promise<void> {
   await tokens.refreshIfNeeded();
   tokens.start();
 
-  // Verify the token before a story ever arrives, so a bad one surfaces at
-  // boot rather than at 3am when something is worth reposting.
+  // Verify the token before a story ever arrives, so a bad one surfaces at boot, not at 3am.
   const account = await getAccountInfo(tokens.config(), logger);
   if (!account) {
     throw new Error(
@@ -76,8 +74,8 @@ async function main(): Promise<void> {
     logger
   );
 
-  // Connected before anything starts listening: if the session is no good,
-  // better to have opened nothing at all.
+  // Connected before anything starts listening: if the session is no good, better to have
+  // opened nothing.
   const sessionString = await reader.connect();
 
   if (sessionString !== config.telegram.sessionString) {
@@ -100,8 +98,8 @@ async function main(): Promise<void> {
     logger
   );
 
-  // Read it once at boot so the first story does not discover the quota is
-  // already spent after building a container for nothing.
+  // Read once at boot so the first story does not discover the quota is spent after building
+  // a container for nothing.
   await quota.ensureCapacity().catch(() => {});
   if (quota.snapshot) {
     logger.info(
