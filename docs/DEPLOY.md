@@ -140,8 +140,9 @@ same network instead; the proxy then reaches the bridge as `bridge:8080`.
 
 ### Health endpoint
 
-`GET /health` returns `200 ok` and discloses nothing else. Use it for proxy
-health checks; the container already uses it for its own `HEALTHCHECK`.
+`GET /health` returns `200 ok` while Telegram is connected, `503` once the
+session drops, and discloses nothing else. Use it for proxy health checks; the
+container already uses it for its own `HEALTHCHECK`.
 
 ## Production with the Cloudflare tunnel
 
