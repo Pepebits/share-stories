@@ -44,9 +44,8 @@ export interface TelegramConfig {
   sessionFile: string;
   monitoredPeers: string[];
   /**
-   * Which story audiences may be republished. Instagram publishes to every
-   * follower with no way to narrow it, so anything but 'public' widens the
-   * audience the author chose.
+   * Which audiences may be republished. Instagram has no way to narrow who sees a post,
+   * so anything but 'public' widens the audience the author chose.
    */
   allowedScopes: StoryScope[];
 }
@@ -71,10 +70,7 @@ export interface AppConfig {
   instagram: InstagramConfig;
   mediaServer: MediaServerSettings;
   pollIntervalSeconds: number;
-  /**
-   * Consecutive publish failures before the account is messaged in its own
-   * Saved Messages. 0 turns the alert off.
-   */
+  /** Consecutive publish failures before the account is messaged in Saved Messages; 0 disables. */
   alertAfterFailures: number;
   databasePath: string;
   instagramTokenFile: string;
@@ -82,9 +78,8 @@ export interface AppConfig {
   projectRoot: string;
 }
 
-// Loopback, RFC 1918, link-local (169.254/16), carrier-grade NAT (100.64/10),
-// and the IPv6 equivalents (::1, fc00::/7, fe80::/10) — none of these resolve
-// for Meta.
+// Loopback, RFC 1918, link-local (169.254/16), carrier-grade NAT (100.64/10), and their IPv6
+// equivalents (::1, fc00::/7, fe80::/10) — none of these resolve for Meta.
 const UNREACHABLE_HOST = new RegExp(
   '^(' +
     [
@@ -103,9 +98,8 @@ const UNREACHABLE_HOST = new RegExp(
 );
 
 /**
- * Meta fetches story media from PUBLIC_BASE_URL over the open internet. A
- * loopback or private address means every publish will fail with an opaque
- * container ERROR, so fail loudly here instead.
+ * Meta fetches story media from PUBLIC_BASE_URL over the open internet. A loopback or
+ * private address means every publish fails with an opaque container ERROR, so fail loudly here.
  */
 export function validatePublicBaseUrl(raw: string): string {
   let url: URL;

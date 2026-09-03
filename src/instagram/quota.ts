@@ -4,12 +4,10 @@ import { InstagramPublishConfig } from './types.js';
 import { getPublishingLimit, type PublishingLimit } from './graph-api.js';
 
 /**
- * Instagram allows 100 API-published posts per rolling 24 hours, and a live
- * test confirmed stories are counted like anything else.
- *
- * Running past the limit does not fail gracefully — Meta rejects the publish
- * after the container has already been built and the media served, so the
- * cost is paid before the refusal arrives. Checking first is cheaper.
+ * Instagram allows 100 API-published posts per rolling 24 hours, and stories
+ * count like anything else. Running past the limit does not fail gracefully —
+ * Meta rejects the publish only after the container is built and the media
+ * served, so checking first is cheaper than paying that cost first.
  */
 
 export class QuotaExceededError extends Error {
@@ -71,17 +69,16 @@ export class QuotaGuard {
   }
 
   /**
-   * Throws QuotaExceededError when there is no room left. Callers should treat
-   * that as "come back later", not as a failed story: the quota is a rolling
-   * window and will free up on its own.
+   * Throws QuotaExceededError when there is no room left — callers should treat that as
+   * "come back later", not a failed story, since the rolling window frees up on its own.
    */
   async ensureCapacity(now: number = Date.now()): Promise<void> {
     if (!this.limit || now - this.fetchedAt >= this.options.refreshIntervalMs) {
       await this.refresh(now);
     }
 
-    // A failed refresh leaves no reading at all. Publishing blind risks
-    // burning a container against a limit we cannot see, so refuse.
+    // A failed refresh leaves no reading at all; publishing blind risks burning a container
+    // against an unseen limit.
     if (!this.limit) {
       throw QuotaExceededError.unknown(this.options.reserve);
     }
@@ -93,8 +90,8 @@ export class QuotaGuard {
   }
 
   /**
-   * Count a publish locally so the guard stays accurate between refreshes.
-   * Meta's own counter is authoritative and overwrites this on the next fetch.
+   * Counts a publish locally so the guard stays accurate between refreshes; Meta's own
+   * counter is authoritative and overwrites this on the next fetch.
    */
   recordPublish(): void {
     if (!this.limit) return;
@@ -122,9 +119,8 @@ export class QuotaGuard {
       this.logger.error('Could not read the Instagram publish quota', {
         error: errorMessage(error),
       });
-      // Deliberately leave this.limit as-is: a stale reading plus local
-      // counting is still better than no idea at all. Only a guard that has
-      // never succeeded blocks publishing outright.
+      // Deliberately leave this.limit as-is: a stale reading plus local counting beats no
+      // idea at all — only a guard that has never succeeded blocks publishing outright.
     }
   }
 }

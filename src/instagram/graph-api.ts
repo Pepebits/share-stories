@@ -9,26 +9,19 @@ import { rejectionReason } from './limits.js';
 
 /**
  * Official Instagram Content Publishing — "Instagram API with Instagram Login".
- *
- * Publishing a story is a three-step handshake:
- *   1. POST /<IG_ID>/media          → returns a container id
- *   2. GET  /<CONTAINER_ID>         → poll status_code until FINISHED
- *   3. POST /<IG_ID>/media_publish  → returns the published media id
- *
- * Meta downloads the media itself, so step 1 needs a publicly reachable URL.
- * See MediaServer for how that URL is produced and revoked.
+ * Publishing a story is a three-step handshake: create a container (POST
+ * /media), poll it until FINISHED (GET /<id>), then publish it (POST
+ * /media_publish). Meta downloads the media itself, so step 1 needs a
+ * publicly reachable URL — see MediaServer for how it is produced.
  */
 
-// Verified against the live API: v26 behaves identically to v25 for account
-// lookup, content_publishing_limit, container creation and status polling.
+// Verified against the live API: v26 behaves identically to v25 for these endpoints.
 const API_VERSION = 'v26.0';
 const DEFAULT_API_BASE = `https://graph.instagram.com/${API_VERSION}`;
 const REFRESH_URL = 'https://graph.instagram.com/refresh_access_token';
 
-/**
- * Meta recommends polling once per minute for at most five minutes. Photos
- * usually finish within seconds, so start tighter and back off to that.
- */
+// Meta recommends polling once per minute for at most five minutes; photos usually finish
+// within seconds, so start tighter and back off to that.
 export const DEFAULT_TIMING: PublishTiming = {
   pollDelaysMs: [2_000, 5_000, 10_000, 20_000, 30_000],
   pollTimeoutMs: 5 * 60_000,
@@ -69,8 +62,7 @@ function describeError(error: unknown): string {
       return parts.join(' ');
     }
 
-    // A 5xx from Meta often arrives without that envelope, and "status code
-    // 500" on its own is not a diagnosis. Carry whatever body came back.
+    // A 5xx from Meta often arrives without that envelope, so carry whatever body came back.
     const body = error.response?.data;
     if (error.response && body) {
       const rendered = typeof body === 'string' ? body : JSON.stringify(body);
@@ -95,8 +87,8 @@ function isPermanent(error: unknown): boolean {
 
 function asPermanentIfHopeless(error: unknown): never {
   if (isPermanent(error)) throw new PermanentError(describeError(error));
-  // Transient failures are retried, and withRetry logs the message it is given
-  // — so it has to be the described one, not axios's bare status line.
+  // withRetry logs whatever message it is given, so it must be the described one, not
+  // axios's bare status line.
   throw error instanceof AxiosError ? new Error(describeError(error)) : error;
 }
 
@@ -165,8 +157,8 @@ async function waitForContainer(
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     let status: ContainerStatus;
-    // `status` carries Meta's own sentence about what went wrong; status_code
-    // alone only ever says ERROR, which is what made these failures guesswork.
+    // `status` carries Meta's own sentence about what went wrong; status_code alone only
+    // ever says ERROR.
     let detail: string | undefined;
     try {
       const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
@@ -180,8 +172,7 @@ async function waitForContainer(
       if (isPermanent(error)) {
         throw new PermanentError(describeError(error));
       }
-      // A transient read failure should not abandon an otherwise healthy
-      // container; keep polling until the deadline.
+      // A transient read failure should not abandon an otherwise healthy container; keep polling.
       logger.warn('Container status check failed, retrying', {
         containerId,
         error: describeError(error),
@@ -243,9 +234,6 @@ async function publishContainer(
   return String(mediaId);
 }
 
-/**
- * Publish a story and return the published Instagram media id.
- */
 export async function publishStory(
   media: StoryMedia,
   config: InstagramPublishConfig,
@@ -259,9 +247,8 @@ export async function publishStory(
     );
   }
 
-  // Meta diagnoses none of this usefully: an empty file comes back as a bare
-  // 500, and anything oversized as a container that sits in IN_PROGRESS and
-  // then ends in ERROR with no reason. Both are cheaper and clearer here.
+  // Meta diagnoses none of this usefully: an empty file is a bare 500, and an oversized one
+  // sits in IN_PROGRESS before ending in ERROR with no reason — cheaper and clearer to check here.
   const refusal = rejectionReason({
     mediaType: media.mediaType,
     bytes: media.buffer.length,
@@ -291,8 +278,7 @@ export async function publishStory(
     const message = `Instagram publish failed: ${describeError(error)}`;
     throw error instanceof PermanentError ? new PermanentError(message) : new Error(message);
   } finally {
-    // Revoke the URL whether we succeeded or not — Meta has no reason to
-    // fetch it again, and a live URL is a leak of the media.
+    // A live URL after publish is a leak of the media.
     hosted.release();
   }
 }
@@ -339,10 +325,8 @@ export interface PublishingLimit {
 }
 
 /**
- * Meta's authoritative view of the rolling publish quota.
- *
- * Confirmed against the live API: stories DO consume it — one published story
- * moved quota_usage from 0 to 1 — despite some docs implying otherwise.
+ * Meta's authoritative view of the rolling publish quota. Confirmed against
+ * the live API: stories DO consume it, despite some docs implying otherwise.
  */
 export async function getPublishingLimit(
   config: InstagramPublishConfig,

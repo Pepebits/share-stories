@@ -1,9 +1,8 @@
 import { createInterface } from 'node:readline/promises';
 
 /**
- * First-run Telegram auth needs a login code that only exists at the moment
- * it is asked for. Under systemd there is no one to ask, so prompting must
- * fail loudly instead of hanging forever on a stdin that will never deliver.
+ * First-run Telegram auth needs a login code that only exists when asked for. Under systemd
+ * there is no one to ask, so prompting must fail loudly instead of hanging on stdin forever.
  */
 
 export interface PromptIO {
@@ -45,10 +44,8 @@ async function readPlain(question: string, io: PromptIO): Promise<string> {
 }
 
 /**
- * A 2FA password must not be left in the scrollback, and readline offers no
- * supported way to suppress echo — the private hook this used to reach for
- * does not even exist on readline/promises. So the terminal is put in raw
- * mode and the keystrokes are handled here.
+ * A 2FA password must not be left in the scrollback, and readline/promises offers no
+ * supported way to suppress echo, so the terminal is put in raw mode and keystrokes handled here.
  */
 function readMasked(question: string, io: PromptIO): Promise<string> {
   return new Promise<string>((resolve, reject) => {

@@ -2,8 +2,7 @@ import type { MediaFacts } from '../instagram/limits.js';
 
 /**
  * The GramJS-facing shapes a story feed is built from, and the pure functions
- * that read them — no client, no logging, no I/O, so this is testable without
- * Telegram.
+ * that read them — no client, no I/O, so this is testable without Telegram.
  */
 
 /** GramJS returns ids as BigInteger instances, not numbers. */
@@ -31,10 +30,8 @@ export interface RawStory {
   /** The author disabled forwarding and screenshots. */
   noforwards?: boolean;
   /**
-   * 'StoryItem' when the story arrived whole. GetAllStories sends only the
-   * newest few that way; everything behind them comes as a 'StoryItemSkipped'
-   * placeholder holding an id and a date and nothing else, and gaps in the
-   * numbering come as 'StoryItemDeleted'.
+   * 'StoryItem' when whole (only the newest few); the rest arrive as 'StoryItemSkipped'
+   * placeholders (id and date only), and numbering gaps as 'StoryItemDeleted'.
    */
   className?: string;
 }
@@ -86,11 +83,8 @@ export function matchesPeer(
 }
 
 /**
- * What Telegram says about a story's media before any of it is downloaded.
- *
- * Sizes arrive as BigInteger, and a story whose media is a document could be
- * either a photo or a video — the mime type is the only hint available this
- * early, and it is only used to pick which limit applies.
+ * What Telegram says about a story's media before any of it is downloaded. Sizes arrive as
+ * BigInteger; the mime type is the only hint of photo vs video available this early.
  */
 export function describeTelegramMedia(media: unknown): MediaFacts {
   const raw = (media ?? {}) as RawMedia;

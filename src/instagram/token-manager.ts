@@ -7,11 +7,10 @@ import { InstagramPublishConfig } from './types.js';
 import { refreshAccessToken } from './graph-api.js';
 
 /**
- * Long-lived Instagram tokens expire 60 days after issue. Nothing renews them
- * on its own, so an unattended bridge silently stops publishing two months in.
- *
- * Refreshing mints a *new* token, which means it cannot live in an immutable
- * .env: the current one is persisted alongside its expiry and reloaded on boot.
+ * Long-lived Instagram tokens expire 60 days after issue, and nothing renews
+ * them on its own. Refreshing mints a *new* token, which can't live in an
+ * immutable .env, so the current one is persisted with its expiry and
+ * reloaded on boot.
  */
 
 export interface StoredToken {
@@ -20,10 +19,8 @@ export interface StoredToken {
   expiresAt: number | null;
   refreshedAt: number | null;
   /**
-   * sha256 of the .env value this chain started from. If the operator pastes a
-   * new token into .env we must abandon the stored chain rather than keep
-   * refreshing a token they deliberately replaced — hashed, not stored raw,
-   * because the file on disk should only ever hold a live token.
+   * sha256 of the .env seed, not the seed itself — the file on disk should only ever hold
+   * a live token. A changed .env value means the operator replaced it deliberately.
    */
   seedHash: string;
 }
@@ -133,16 +130,13 @@ export class TokenManager {
         : 'unknown',
     });
 
-    // Rewrite immediately so the plaintext seed in a file from before 1.1.0 never
-    // reaches disk again, even if a refresh never happens to trigger it.
+    // Rewrite immediately so the plaintext seed from before 1.1.0 never reaches disk again.
     if (migratingLegacyFile) await this.persist();
   }
 
   /**
-   * Refresh when expiry is near, or when it is unknown because the token came
-   * from .env and has never been through a refresh.
-   *
-   * Returns true if a refresh actually happened.
+   * Refreshes when expiry is near, or when it is unknown because the token
+   * came from .env and has never been refreshed. Returns true if it did.
    */
   async refreshIfNeeded(now: number = Date.now()): Promise<boolean> {
     const { expiresAt } = this.token;
@@ -174,8 +168,7 @@ export class TokenManager {
       await this.persist();
       return true;
     } catch (error) {
-      // Meta refuses to refresh a token younger than 24 hours. That is the
-      // expected answer right after issuing one, not a fault.
+      // Meta refuses to refresh a token younger than 24 hours — expected right after issuing one.
       this.logger.warn('Instagram token refresh did not succeed; will retry', {
         error: errorMessage(error),
       });
@@ -205,8 +198,8 @@ export class TokenManager {
     try {
       await mkdir(dirname(path), { recursive: true });
 
-      // Write-then-rename so a crash mid-write cannot leave a truncated token
-      // file, which would lock the bridge out until someone noticed.
+      // Write-then-rename so a crash mid-write cannot leave a truncated token file, which
+      // would lock the bridge out.
       const tempPath = `${path}.tmp`;
       await writeFile(tempPath, JSON.stringify(this.token, null, 2), { mode: 0o600 });
       await rename(tempPath, path);
@@ -218,8 +211,7 @@ export class TokenManager {
           : 'unknown',
       });
     } catch (error) {
-      // The in-memory token is still good; losing the file only costs us the
-      // refresh chain on the next restart.
+      // The in-memory token is still good; losing the file only costs the refresh chain on restart.
       this.logger.error('Could not persist the refreshed Instagram token', {
         path,
         error: errorMessage(error),

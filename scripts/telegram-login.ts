@@ -1,12 +1,7 @@
 /**
- * First-run Telegram authentication, on its own.
- *
- * Telegram sends a login code that only exists at the moment it is asked for,
- * so this has to be run by a human at a terminal. Once the session string is
- * saved, the bridge starts unattended forever after.
- *
- * Deliberately independent of the rest of the config: authenticating should
- * not require Instagram credentials or a reachable PUBLIC_BASE_URL.
+ * First-run Telegram authentication: Telegram sends a login code that has to be typed
+ * in, so this runs at a terminal once and the bridge starts unattended after that.
+ * Independent of the rest of the config, so authenticating needs no Instagram credentials.
  *
  *   pnpm run login
  */

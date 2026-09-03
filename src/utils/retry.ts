@@ -7,9 +7,8 @@ export interface RetryOptions {
   logger?: Logger;
   operation: string;
   /**
-   * Return false to give up immediately. Use it for failures that cannot
-   * resolve on their own — a rejected token retried three times just delays
-   * the log line that explains what to fix.
+   * Return false to give up immediately, for failures that cannot resolve on their own —
+   * a rejected token retried three times just delays the log line that explains what to fix.
    */
   shouldRetry?: (error: Error) => boolean;
 }

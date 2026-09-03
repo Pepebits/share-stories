@@ -4,11 +4,8 @@ import { EventEmitter } from 'node:events';
 import { isInteractive, NonInteractiveError, prompt, type PromptIO } from '../src/utils/prompt.js';
 
 /**
- * The masked branch used to reach for readline's private _writeToOutput,
- * which does not exist on readline/promises — so asking for the 2FA password
- * threw "Cannot read properties of undefined (reading 'bind')". GramJS
- * retries that step in a loop, so it surfaced as an endless stream of
- * connection errors rather than as the bug it was.
+ * The masked branch once relied on a private readline hook that readline/promises lacks,
+ * and GramJS retries a failed 2FA prompt in a loop — so it must work without one.
  */
 
 class FakeInput extends EventEmitter {

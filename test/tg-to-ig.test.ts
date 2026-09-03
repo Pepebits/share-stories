@@ -10,10 +10,8 @@ import type { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
 
 /**
- * The reader downloads everything it returns, so what the bridge asks it for
- * is the whole cost control. Ten stories that could never succeed once cost
- * 1563 publishes and some 4700 requests to Meta; the gate below is what keeps
- * that bounded, in both directions.
+ * The reader downloads everything it yields, so what the bridge asks it for is the whole
+ * cost control — the gate below is what keeps a hopeless story from being retried forever.
  */
 describe('createTgToIgBridge', () => {
   let dir: string;
@@ -154,10 +152,7 @@ describe('createTgToIgBridge', () => {
     );
   });
 
-  /**
-   * The whole point of the alert: eleven days of failures went unnoticed
-   * because nothing but the log ever said so.
-   */
+  // The point of the alert: a failure only the log records goes unnoticed for days.
   describe('alerting', () => {
     it('says nothing until the threshold is reached', async () => {
       const { reader, alerts } = stubReader(['peer:1', 'peer:2']);
@@ -239,10 +234,8 @@ describe('createTgToIgBridge', () => {
   });
 
   describe('story ordering', () => {
-    // publishStory is not injectable, so completion is observed the same way
-    // production would notice it: a row exists once an attempt has been made.
-    // (attemptState() is not useable here — the first failure's backoff is 0
-    // minutes, so it reads 'ready' both before the attempt and right after.)
+    // publishStory is not injectable, so completion is read from the attempts column.
+    // attemptState() cannot tell: the first backoff is 0, so it reads 'ready' before and after.
     it('publishes a story before asking the reader for the next one', async () => {
       const order: string[] = [];
       const reader: StorySource = {
@@ -265,9 +258,8 @@ describe('createTgToIgBridge', () => {
   });
 
   describe('stop', () => {
-    // A for-await break calls the generator's return(), which unwinds it
-    // without running code placed after the yield — so completion is read
-    // from wall-clock time and the state store, not from a flag in the stub.
+    // A for-await break calls the generator's return(), so code after the yield never runs;
+    // completion is read from the clock and the store instead of a flag in the stub.
     it('waits for the in-flight cycle, and publishes nothing past it', async () => {
       const reader: StorySource = {
         stories: async function* () {
