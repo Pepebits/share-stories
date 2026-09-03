@@ -34,14 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Must precede setup-node: the pnpm cache lookup needs the store path.
-      # Reads the version from package.json "packageManager".
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      # Downloads pnpm's self-contained binary (version from package.json
+      # "packageManager") and installs Node through it, so nothing here uses
+      # the npm the runner bundles: its self-update flattens the npm/npx/
+      # corepack symlinks into broken files (actions/runner#2094).
+      # No store cache: on a self-hosted runner the store already persists.
+      - uses: pnpm/setup@v2
         with:
-          node-version: '24'
-          cache: pnpm
+          runtime: node@24
+          install: false
 
       - name: Install
         # Fails rather than rewriting the lockfile if package.json drifted.
@@ -66,11 +67,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/setup@v2
         with:
-          node-version: '24'
-          cache: pnpm
+          runtime: node@24
+          install: false
 
       - name: Install
         run: pnpm install --frozen-lockfile
