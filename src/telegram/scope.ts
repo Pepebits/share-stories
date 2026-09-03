@@ -9,12 +9,7 @@
 
 export type StoryScope = 'public' | 'contacts' | 'selectedContacts' | 'closeFriends' | 'unknown';
 
-export const ALL_SCOPES: StoryScope[] = [
-  'public',
-  'contacts',
-  'selectedContacts',
-  'closeFriends',
-];
+export const ALL_SCOPES: StoryScope[] = ['public', 'contacts', 'selectedContacts', 'closeFriends'];
 
 /**
  * Everything, matching what this bridge did before it read scopes at all —

@@ -4,7 +4,10 @@ import { validatePublicBaseUrl } from '../src/config.js';
 
 describe('validatePublicBaseUrl', () => {
   it('accepts a public HTTPS origin and returns it normalized', () => {
-    assert.equal(validatePublicBaseUrl('https://stories.example.com'), 'https://stories.example.com');
+    assert.equal(
+      validatePublicBaseUrl('https://stories.example.com'),
+      'https://stories.example.com'
+    );
   });
 
   it('rejects a string that is not a URL', () => {

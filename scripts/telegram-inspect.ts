@@ -48,7 +48,8 @@ if (feed.length === 0) {
   console.log('  (empty — nobody you follow has an active story right now)');
 } else {
   for (const entry of feed) {
-    const peerId = (entry.peer as { userId?: { toString(): string }; channelId?: { toString(): string } }) ?? {};
+    const peerId =
+      (entry.peer as { userId?: { toString(): string }; channelId?: { toString(): string } }) ?? {};
     const id = (peerId.userId ?? peerId.channelId)?.toString() ?? '?';
     const user = [...(all.users ?? []), ...(all.chats ?? [])].find(
       (u) => String((u as { id?: unknown }).id) === id
@@ -59,9 +60,9 @@ if (feed.length === 0) {
 
 console.log('\n── stories.GetPeerStories (self) ───────────────────────');
 try {
-  const mine = (await client.invoke(
-    new Api.stories.GetPeerStories({ peer: 'me' })
-  )) as unknown as { stories?: { stories?: unknown[] } };
+  const mine = (await client.invoke(new Api.stories.GetPeerStories({ peer: 'me' }))) as unknown as {
+    stories?: { stories?: unknown[] };
+  };
 
   const count = mine.stories?.stories?.length ?? 0;
   console.log(

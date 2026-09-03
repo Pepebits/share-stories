@@ -53,10 +53,7 @@ describe('matchesPeer', () => {
   });
 
   it('matches by the second username in the array', () => {
-    assert.equal(
-      matchesPeer(['@second'], '1', { handles: ['first', 'second'] }),
-      true
-    );
+    assert.equal(matchesPeer(['@second'], '1', { handles: ['first', 'second'] }), true);
   });
 
   it('matches by title', () => {

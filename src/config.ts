@@ -31,7 +31,10 @@ function parseIntEnv(key: string, fallback: number): number {
 function parseListEnv(key: string): string[] {
   const raw = optionalEnv(key);
   return raw
-    ? raw.split(',').map((item) => item.trim()).filter(Boolean)
+    ? raw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
     : [];
 }
 
