@@ -7,8 +7,8 @@ import type { StoryMedia } from '../src/telegram/types.js';
 import { MetaStub, metaError } from './helpers/meta-stub.js';
 import { silentLogger } from './helpers/logger.js';
 
-const META_PORT = 45810;
-const MEDIA_PORT = 45811;
+// Below the ephemeral range, so no outgoing connection can be holding it. See MetaStub.start.
+const MEDIA_PORT = 25811;
 
 /** Production waits minutes; these collapse it to milliseconds. */
 const FAST: PublishTiming = {
@@ -39,7 +39,7 @@ describe('publishStory', () => {
 
   beforeEach(async () => {
     meta = new MetaStub();
-    await meta.start(META_PORT);
+    await meta.start();
 
     mediaServer = new MediaServer(
       {
@@ -273,7 +273,7 @@ describe('getAccountInfo', () => {
 
   beforeEach(async () => {
     meta = new MetaStub();
-    await meta.start(META_PORT + 2);
+    await meta.start();
   });
 
   afterEach(async () => {

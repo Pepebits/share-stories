@@ -15,7 +15,7 @@ on:
 # self-hosted runner that means executing it on the VPS. Requiring approval
 # does not help: approving a malicious pull request runs it just the same.
 #
-# The suite binds fixed ports (45790-45812). Two runs sharing the runner
+# The suite binds fixed ports (25790-25811). Two runs sharing the runner
 # would collide on them, so only one is allowed in flight per ref.
 concurrency:
   group: ci-${{ github.ref }}

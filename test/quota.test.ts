@@ -6,13 +6,6 @@ import type { InstagramPublishConfig } from '../src/instagram/types.js';
 import { MetaStub, metaError } from './helpers/meta-stub.js';
 import { silentLogger } from './helpers/logger.js';
 
-/**
- * A fresh port per test: axios keeps sockets alive between requests, and
- * reusing one against a restarted stub surfaces as a random ECONNRESET in
- * whichever test happened to draw the stale socket.
- */
-let nextPort = 45840;
-
 describe('publish quota', () => {
   let meta: MetaStub;
   let config: InstagramPublishConfig;
@@ -22,7 +15,7 @@ describe('publish quota', () => {
 
   beforeEach(async () => {
     meta = new MetaStub();
-    await meta.start(nextPort++);
+    await meta.start();
     config = { accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url };
   });
 

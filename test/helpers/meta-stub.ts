@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 export interface MetaCall {
   method: string;
@@ -73,18 +74,23 @@ export class MetaStub {
     return this.calls.filter((c) => c.method === method && c.path.endsWith(suffix));
   }
 
-  async start(port: number): Promise<void> {
-    this.port = port;
+  /**
+   * Lets the kernel pick the port. A fixed one inside the ephemeral range
+   * (32768-60999 on Linux) collides with the source port of an earlier
+   * test's keep-alive connection, and the listen fails with EADDRINUSE.
+   */
+  async start(): Promise<void> {
     const server = createServer((req, res) => void this.handle(req, res));
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, '127.0.0.1', () => {
+      server.listen(0, '127.0.0.1', () => {
         server.off('error', reject);
         resolve();
       });
     });
 
+    this.port = (server.address() as AddressInfo).port;
     this.server = server;
   }
 

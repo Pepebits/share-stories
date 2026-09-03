@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
 
-const PORT = 45790;
+// Below the ephemeral range, so no outgoing connection can be holding them. See MetaStub.start.
+const PORT = 25790;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-const HEALTH_PORT = 45791;
+const HEALTH_PORT = 25791;
 
 /** 4KB of recognisable bytes so slices can be compared exactly. */
 const payload = Buffer.from(Array.from({ length: 4096 }, (_, i) => i % 251));
