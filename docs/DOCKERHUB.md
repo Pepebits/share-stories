@@ -112,8 +112,9 @@ services:
       - '127.0.0.1:8080:8080'
 ```
 
-`GET /health` returns `200 ok` for proxy and container health checks, and
-discloses nothing about what is hosted.
+`GET /health` returns `200 ok` while Telegram is connected and `503` once the
+session drops, so the container goes unhealthy instead of idling. It discloses
+nothing about what is hosted.
 
 ## Instagram setup
 
