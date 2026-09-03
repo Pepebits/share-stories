@@ -9,9 +9,10 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
-    "format": "prettier --write \"{src,test}/**/*.ts\"",
+    "format": "prettier --write \"{src,test,scripts}/**/*.ts\"",
+    "format:check": "prettier --check \"{src,test,scripts}/**/*.ts\"",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "verify": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm test && pnpm audit --prod",
+    "verify": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run build && pnpm test && pnpm audit --prod",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "login": "tsx scripts/telegram-login.ts",
     "inspect": "tsx scripts/telegram-inspect.ts"

@@ -13,10 +13,7 @@ export interface RetryOptions {
   shouldRetry?: (error: Error) => boolean;
 }
 
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: RetryOptions
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions): Promise<T> {
   const { maxRetries, baseDelayMs, maxDelayMs, logger, operation, shouldRetry } = options;
   let lastError: Error | undefined;
 
@@ -46,7 +43,5 @@ export async function withRetry<T>(
     }
   }
 
-  throw new Error(
-    `[${operation}] all ${maxRetries + 1} attempts failed: ${lastError?.message}`
-  );
+  throw new Error(`[${operation}] all ${maxRetries + 1} attempts failed: ${lastError?.message}`);
 }

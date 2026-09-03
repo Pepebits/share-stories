@@ -33,7 +33,8 @@ async function main(): Promise<void> {
 
   const runMaintenance = () => {
     const removed = store.cleanup(STORY_HISTORY_DAYS);
-    if (removed > 0) logger.debug(`Purged ${removed} story record(s) older than ${STORY_HISTORY_DAYS} days`);
+    if (removed > 0)
+      logger.debug(`Purged ${removed} story record(s) older than ${STORY_HISTORY_DAYS} days`);
   };
   runMaintenance();
   const maintenanceInterval = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
@@ -130,12 +131,16 @@ async function main(): Promise<void> {
     tokens.stop();
     clearInterval(maintenanceInterval);
 
-    await mediaServer.stop().catch((error: Error) =>
-      logger.error('Error stopping media server', { error: error.message })
-    );
-    await reader.disconnect().catch((error: Error) =>
-      logger.error('Error disconnecting Telegram reader', { error: error.message })
-    );
+    await mediaServer
+      .stop()
+      .catch((error: Error) =>
+        logger.error('Error stopping media server', { error: error.message })
+      );
+    await reader
+      .disconnect()
+      .catch((error: Error) =>
+        logger.error('Error disconnecting Telegram reader', { error: error.message })
+      );
 
     store.close();
     logger.info('Shutdown complete');

@@ -88,10 +88,7 @@ describe('rejectionReason', () => {
     });
 
     it('checks size even when the duration is unknown', () => {
-      assert.notEqual(
-        rejectionReason({ mediaType: 'video', bytes: MAX_VIDEO_BYTES + 1 }),
-        null
-      );
+      assert.notEqual(rejectionReason({ mediaType: 'video', bytes: MAX_VIDEO_BYTES + 1 }), null);
     });
 
     it('ignores duration on a photo, which has none', () => {

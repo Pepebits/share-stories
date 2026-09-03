@@ -189,7 +189,7 @@ async function waitForContainer(
         `Container ${containerId} ended in status ${status}. ` +
           (detail
             ? `Meta says: ${detail}`
-            : "Meta gave no reason. Usually the media failed its format checks, or PUBLIC_BASE_URL was unreachable.")
+            : 'Meta gave no reason. Usually the media failed its format checks, or PUBLIC_BASE_URL was unreachable.')
       );
     }
 
@@ -332,11 +332,14 @@ export async function getPublishingLimit(
   config: InstagramPublishConfig,
   logger: Logger
 ): Promise<PublishingLimit> {
-  const response = await axios.get(`${baseUrl(config)}/${config.accountId}/content_publishing_limit`, {
-    params: { fields: 'quota_usage,config' },
-    headers: authHeaders(config),
-    timeout: 15_000,
-  });
+  const response = await axios.get(
+    `${baseUrl(config)}/${config.accountId}/content_publishing_limit`,
+    {
+      params: { fields: 'quota_usage,config' },
+      headers: authHeaders(config),
+      timeout: 15_000,
+    }
+  );
 
   const entry = response.data?.data?.[0];
   if (!entry) {
