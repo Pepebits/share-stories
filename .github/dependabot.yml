@@ -1,16 +1,18 @@
 version: 2
 
-# One pull request per ecosystem per month, with every update in it. The
-# image is only rebuilt on a tag, so a CVE in a runtime dependency waits for
-# the next release anyway; one monthly batch to review beats a trickle.
+# The image is only rebuilt on a tag, so a CVE in a runtime dependency waits
+# for the next release anyway: one monthly batch to review beats a trickle.
+# Minor and patch updates share one pull request; a major gets its own, since
+# it is the one that needs reading rather than a green build.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
     groups:
-      dependencies:
+      minor-and-patch:
         patterns: ['*']
+        update-types: ['minor', 'patch']
     # GramJS leaves the story surface untyped, so feed.ts rests on shapes read
     # from live responses. A major gets checked against the live API by hand,
     # not merged on a green build that never talks to Telegram.
@@ -23,10 +25,17 @@ updates:
     schedule:
       interval: monthly
     groups:
-      actions:
+      minor-and-patch:
         patterns: ['*']
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    # The Node major is pinned on purpose: package.json "engines" and the
+    # final stage's copied binary both assume it. Bumping it is a release
+    # decision, made together with those.
+    ignore:
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
