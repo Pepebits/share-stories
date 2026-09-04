@@ -39,7 +39,10 @@ LABEL org.opencontainers.image.title="share-stories" \
       org.opencontainers.image.source="https://github.com/Pepebits/share-stories" \
       org.opencontainers.image.licenses="MIT"
 
-RUN apk add --no-cache libstdc++ \
+# The base tag lags the package repository, so a CVE fixed in openssl can
+# still ship in a fresh pull of the tag until this catches it up.
+RUN apk upgrade --no-cache \
+ && apk add --no-cache libstdc++ \
  && addgroup -g 1000 node \
  && adduser -u 1000 -G node -s /bin/sh -D node
 
