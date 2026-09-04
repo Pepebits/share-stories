@@ -24,6 +24,7 @@ describe('TokenManager', () => {
         accountId: 'acct_1',
         apiBase: meta.url,
         refreshWhenRemainingMs: 14 * DAY_MS,
+        alertWhenRemainingMs: 7 * DAY_MS,
         checkIntervalMs: 60_000,
         ...overrides,
       },
@@ -194,6 +195,91 @@ describe('TokenManager', () => {
       assert.equal(await manager.refreshIfNeeded(), false);
       assert.equal(await manager.refreshIfNeeded(), true);
       assert.equal(manager.config().accessToken, 'refreshed_1');
+    });
+  });
+
+  describe('expiry alerts', () => {
+    const storeExpiringIn = async (days: number) => {
+      const stored: StoredToken = {
+        accessToken: 'expiring_token',
+        expiresAt: Date.now() + days * DAY_MS,
+        refreshedAt: Date.now(),
+        seedHash: seedHash('env_token'),
+      };
+      await writeFile(tokenFile, JSON.stringify(stored));
+    };
+
+    it('raises the alarm when a refresh fails close to expiry', async () => {
+      meta.refreshResponses = [metaError(400, 'Cannot refresh', 190)];
+      await storeExpiringIn(3);
+      const alerts: string[] = [];
+
+      const manager = makeManager('env_token', { alert: (text: string) => alerts.push(text) });
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal(alerts.length, 1);
+      assert.match(alerts[0], /expires in 3 day\(s\)/);
+      assert.match(alerts[0], /Cannot refresh/);
+    });
+
+    it('says so when the token has already expired', async () => {
+      meta.refreshResponses = [metaError(400, 'Cannot refresh', 190)];
+      await storeExpiringIn(-1);
+      const alerts: string[] = [];
+
+      const manager = makeManager('env_token', { alert: (text: string) => alerts.push(text) });
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal(alerts.length, 1);
+      assert.match(alerts[0], /has expired/);
+    });
+
+    // Inside the renewal window but with a week or more to go, a rejection is still routine.
+    it('stays quiet while there is time for the refresh to start working', async () => {
+      meta.refreshResponses = [metaError(400, 'Cannot refresh', 190)];
+      await storeExpiringIn(10);
+      const alerts: string[] = [];
+
+      const manager = makeManager('env_token', { alert: (text: string) => alerts.push(text) });
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal(alerts.length, 0);
+    });
+
+    // A fresh .env token has no known expiry, and Meta rejects refreshing it for 24 hours.
+    it('stays quiet when the expiry is unknown', async () => {
+      meta.refreshResponses = [metaError(400, 'Token must be at least 24 hours old', 190)];
+      const alerts: string[] = [];
+
+      const manager = makeManager('env_token', { alert: (text: string) => alerts.push(text) });
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal(alerts.length, 0);
+    });
+
+    it('alerts once per run of failures, and again after a recovery', async () => {
+      meta.refreshResponses = [
+        metaError(400, 'Cannot refresh', 190),
+        metaError(400, 'Cannot refresh', 190),
+      ];
+      await storeExpiringIn(3);
+      const alerts: string[] = [];
+
+      const manager = makeManager('env_token', { alert: (text: string) => alerts.push(text) });
+      await manager.load();
+      await manager.refreshIfNeeded();
+      await manager.refreshIfNeeded();
+      assert.equal(alerts.length, 1);
+
+      // Third call succeeds (the stub's default), then the next failure is news again.
+      assert.equal(await manager.refreshIfNeeded(), true);
+      meta.refreshResponses = [metaError(400, 'Cannot refresh', 190)];
+      await manager.refreshIfNeeded(manager.state.expiresAt! - 2 * DAY_MS);
+      assert.equal(alerts.length, 2);
     });
   });
 

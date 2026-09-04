@@ -39,6 +39,13 @@ async function main(): Promise<void> {
   runMaintenance();
   const maintenanceInterval = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
 
+  // Alerts go to Telegram, which is not connected yet when the boot-time refresh runs, so
+  // one raised there is held until it is.
+  let pendingAlert: string | null = null;
+  let deliverAlert = (text: string) => {
+    pendingAlert = text;
+  };
+
   // Long-lived tokens expire after 60 days, so the running token is whatever the last
   // refresh produced, not necessarily what is in .env.
   const tokens = new TokenManager(
@@ -47,6 +54,7 @@ async function main(): Promise<void> {
       envToken: config.instagram.accessToken,
       accountId: config.instagram.accountId,
       ...DEFAULT_TOKEN_OPTIONS,
+      alert: (text) => deliverAlert(text),
     },
     logger
   );
@@ -78,6 +86,9 @@ async function main(): Promise<void> {
   // Connected before anything starts listening: if the session is no good, better to have
   // opened nothing.
   const sessionString = await reader.connect();
+
+  deliverAlert = (text) => void reader.notifySelf(text);
+  if (pendingAlert) deliverAlert(pendingAlert);
 
   if (sessionString !== config.telegram.sessionString) {
     writeSession(config.telegram.sessionFile, sessionString);

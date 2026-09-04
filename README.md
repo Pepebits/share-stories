@@ -157,7 +157,9 @@ Long-lived Instagram tokens expire after 60 days, and refreshing mints a *new*
 one — so the live token cannot stay in an immutable `.env`.
 `INSTAGRAM_ACCESS_TOKEN` seeds the chain; from then on the bridge refreshes
 once fewer than 14 days remain and persists the result to
-`INSTAGRAM_TOKEN_FILE`.
+`INSTAGRAM_TOKEN_FILE`. If refreshing keeps failing with under 7 days left, the
+account gets one message in Saved Messages saying a new token has to be issued
+by hand before it expires.
 
 ### Publish quota
 
@@ -182,7 +184,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
   image --severity HIGH,CRITICAL --ignore-unfixed share-stories:scan
 ```
 
-198 tests, no credentials or network needed: `graph.instagram.com` is stubbed
+203 tests, no credentials or network needed: `graph.instagram.com` is stubbed
 by a local server, so the publish handshake runs end to end — container
 creation, status polling, `ERROR`/`EXPIRED` containers, a rejected token
 aborting without retries, 5xx and 429 retrying, and the media URL being
