@@ -3,7 +3,7 @@
 #
 # SQLite is built into Node from 24.19, so this carries no native module —
 # nothing to compile, and no toolchain in any stage.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 
 WORKDIR /app
 RUN corepack enable
@@ -19,7 +19,7 @@ COPY src ./src
 RUN pnpm run build
 
 
-FROM node:24-alpine AS deps
+FROM node:26-alpine AS deps
 
 WORKDIR /app
 RUN corepack enable
