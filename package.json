@@ -30,19 +30,19 @@
     "node": ">=24.19"
   },
   "dependencies": {
-    "axios": "^1.7.9",
+    "axios": "^1.20.0",
     "telegram": "^2.26.22",
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^24.13.3",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
-    "eslint": "^9.16.0",
+    "eslint": "^10.9.1",
     "globals": "^17.9.0",
-    "prettier": "^3.4.2",
+    "prettier": "^3.9.6",
     "tsx": "^4.22.4",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   }
 }
