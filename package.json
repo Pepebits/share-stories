@@ -43,6 +43,6 @@
     "globals": "^17.9.0",
     "prettier": "^3.9.6",
     "tsx": "^4.22.4",
-    "typescript": "^5.7.0"
+    "typescript": "^6.0.3"
   }
 }
