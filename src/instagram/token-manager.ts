@@ -42,19 +42,32 @@ export interface TokenManagerOptions {
   apiBase?: string;
   /** Refresh once less than this remains before expiry. */
   refreshWhenRemainingMs: number;
+  /**
+   * Raise the alarm when a refresh fails with less than this left. Meta's own rejections
+   * of a young token fall well outside it, so only a refresh that keeps failing gets through.
+   */
+  alertWhenRemainingMs: number;
   checkIntervalMs: number;
+  /**
+   * Told, once per run of failures, that the token is about to die with no working
+   * refresh — the operator has to mint a new one by hand before it does.
+   */
+  alert?: (text: string) => void;
 }
 
 const DAY_MS = 86_400_000;
 
 export const DEFAULT_TOKEN_OPTIONS = {
   refreshWhenRemainingMs: 14 * DAY_MS,
+  alertWhenRemainingMs: 7 * DAY_MS,
   checkIntervalMs: 12 * 60 * 60_000,
 };
 
 export class TokenManager {
   private token: StoredToken;
   private timer: NodeJS.Timeout | null = null;
+  // Edge-triggered: one alert per run of failed refreshes, cleared by the next success.
+  private alerted = false;
 
   constructor(
     private readonly options: TokenManagerOptions,
@@ -166,14 +179,34 @@ export class TokenManager {
       };
 
       await this.persist();
+      this.alerted = false;
       return true;
     } catch (error) {
       // Meta refuses to refresh a token younger than 24 hours — expected right after issuing one.
       this.logger.warn('Instagram token refresh did not succeed; will retry', {
         error: errorMessage(error),
       });
+      this.alertIfExpiring(now, errorMessage(error));
       return false;
     }
+  }
+
+  private alertIfExpiring(now: number, reason: string): void {
+    const { expiresAt } = this.token;
+    if (expiresAt === null || expiresAt - now > this.options.alertWhenRemainingMs) return;
+    if (this.alerted || !this.options.alert) return;
+
+    this.alerted = true;
+    const remaining = expiresAt - now;
+    const when =
+      remaining <= 0
+        ? 'has expired'
+        : `expires in ${Math.max(1, Math.round(remaining / DAY_MS))} day(s)`;
+    this.options.alert(
+      `⚠️ share-stories: the Instagram token ${when} and refreshing it keeps failing. ` +
+        'Issue a new long-lived token and put it in INSTAGRAM_ACCESS_TOKEN before then.\n\n' +
+        `Last error: ${reason}`
+    );
   }
 
   start(): void {
