@@ -219,8 +219,9 @@ git tag v1.0.0
 git push --tags
 ```
 
-`.github/workflows/publish.yml` publishes `ghcr.io/<owner>/share-stories` as
-`1.0.0`, `1.0` and `latest`.
+`.github/workflows/publish.yml` runs `pnpm run verify` first, checks the tag
+matches the `version` in `package.json`, and only then publishes
+`ghcr.io/<owner>/share-stories` as `1.0.0`, `1.0` and `latest`.
 
 > **It builds for amd64 and arm64.** An image built only on an Apple Silicon
 > machine will not start on an x86 server, and the failure — `exec format
