@@ -147,9 +147,19 @@ qualified with the peer — they restart per peer, so two channels can both own
 story `3`.
 
 Failures are recorded but **not** treated as final: a transient rejection is
-retried on the next cycle. Permanent ones (rejected token, media Meta refuses)
-are not retried. Stories interrupted mid-publish by a crash are recovered at
-startup instead of staying blocked forever.
+retried with a growing delay — 5, 20 and 90 minutes — and after five failures
+the story is written off until it expires, with a warning in the log. Permanent
+ones (rejected token, media Meta refuses) are not retried at all. Stories
+interrupted mid-publish by a crash are recovered at startup instead of staying
+blocked forever.
+
+### Alerts
+
+The bridge runs unattended, so it reports two things to the Telegram account's
+own Saved Messages rather than only to the log: `ALERT_AFTER_FAILURES`
+consecutive publish failures (default 3, `0` disables it) — followed by one
+message when publishing works again — and an Instagram token that is about to
+expire and cannot be refreshed, described below.
 
 ### Token rotation
 
@@ -172,7 +182,7 @@ it pauses the cycle rather than failing the story.
 ## Tests
 
 ```bash
-pnpm run verify    # everything CI runs: lint, typecheck, build, tests, audit
+pnpm run verify    # what CI runs: lint, format, typecheck, build, tests, audit
 pnpm test          # just the tests — no credentials or network needed
 ```
 
@@ -198,7 +208,9 @@ pure `telegram/feed.ts` module, which is tested, and the startup path in
 ## Limitations
 
 - **Captions are dropped**: Instagram stories do not render the caption field.
-- **Media requirements**: Meta validates format server-side and a rejected file
+- **Media requirements**: videos over 60 seconds or 100 MB and photos over 8 MB
+  are skipped before download, since Instagram would refuse them. Anything else
+  Meta dislikes — codec, aspect ratio — is only validated server-side and
   surfaces as a container `ERROR` with little detail.
 - **One account per install**: there is no multi-tenancy, by design — see
   *Before you share this*.

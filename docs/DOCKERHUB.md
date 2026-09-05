@@ -56,7 +56,10 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TELEGRAM_SESSION_STRING` | — | Produced by a one-off interactive login — see below. Leave unset and the session file mounted at `/app/data` is used instead. |
+| `TELEGRAM_SESSION_FILE` | `./data/telegram-session.txt` | Where the session written by the one-off login lives — see below. Also where the bridge saves it when Telegram rotates it. |
+| `TELEGRAM_SESSION_STRING` | — | The session as a string, for environments with no volume. Goes stale once Telegram rotates the session; the file is the better home. |
+| `TELEGRAM_STORY_SCOPES` | `all` | Which story audiences to carry: `public`, `contacts`, `selectedContacts`, `closeFriends`, comma-separated, or `all`. A value that cannot be parsed falls back to `public`. |
+| `ALERT_AFTER_FAILURES` | `3` | After this many consecutive publish failures, a warning is sent to the Telegram account's Saved Messages. `0` disables it. |
 | `MEDIA_SERVER_HOST` | `127.0.0.1` | **Set to `0.0.0.0` in Docker** — loopback is unreachable from another container |
 | `MEDIA_SERVER_PORT` | `8080` | Port the media server binds |
 | `MEDIA_URL_TTL_SECONDS` | `600` | How long a media URL stays valid if Meta never fetches it |
@@ -127,11 +130,11 @@ dashboard in places. Step by step:
 
 | Tag | Meaning |
 |---|---|
-| `1.0.0` | Exact version, never moves |
-| `1.0` | Newest patch of that minor series |
+| `1.1.0` | Exact version, never moves |
+| `1.1` | Newest patch of that minor series |
 | `latest` | Newest release |
 
-Pin `1.0.0` if you want reproducibility; use `1.0` to pick up patches.
+Pin `1.1.0` if you want reproducibility; use `1.1` to pick up patches.
 
 ## Licence
 

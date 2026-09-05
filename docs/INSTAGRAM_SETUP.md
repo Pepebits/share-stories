@@ -163,5 +163,10 @@ days remain, storing the current one in `INSTAGRAM_TOKEN_FILE` — so the value 
 Meta refuses to refresh a token less than 24 hours old. That is expected right
 after minting one; the bridge logs it and retries later.
 
+If refreshing still fails with fewer than 7 days left, the bridge sends one
+message to the Telegram account's Saved Messages saying a new token has to be
+minted by hand before the old one expires. Once a refresh succeeds the alarm
+resets, so a later expiry warns again.
+
 To take over by hand, paste a new token into `.env`: the stored chain is
 discarded as soon as the seed no longer matches.
