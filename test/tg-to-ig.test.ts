@@ -308,8 +308,7 @@ describe('createTgToIgBridge', () => {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(join(dir, 'state.db'));
     const row = db.prepare('SELECT attempts FROM stories WHERE story_id = ?').get(id) as
-      | { attempts?: number }
-      | undefined;
+      { attempts?: number } | undefined;
     db.close();
     return row?.attempts ?? 0;
   }
