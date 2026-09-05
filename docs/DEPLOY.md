@@ -181,9 +181,9 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoi...
 **3. Authenticate before the first start**
 
 The login prompt cannot work inside a detached container. Run `pnpm run login`
-on any machine with Node, then put the resulting string in
-`TELEGRAM_SESSION_STRING` — or drop the file into `./data`, which is mounted
-into the container.
+on any machine with Node — it writes `data/telegram-session.txt` — and drop that
+file into `./data`, which is mounted into the container. Keep it mode `0600`
+and owned by uid `1000`, the container's user.
 
 **4. Start**
 
@@ -212,16 +212,18 @@ tunnel reaches it over the internal network as `bridge:8080`.
 
 ## Publishing the image
 
-Tagging a release builds and pushes to GitHub Container Registry:
+Tagging a release builds and pushes to GitHub Container Registry, and to Docker
+Hub when that is configured (below):
 
 ```bash
-git tag v1.0.0
+git tag v1.1.0
 git push --tags
 ```
 
 `.github/workflows/publish.yml` runs `pnpm run verify` first, checks the tag
 matches the `version` in `package.json`, and only then publishes
-`ghcr.io/<owner>/share-stories` as `1.0.0`, `1.0` and `latest`.
+`ghcr.io/<owner>/share-stories` as `1.0.0`, `1.0` and `latest`. Every image
+ships with an SBOM and signed provenance attached.
 
 > **It builds for amd64 and arm64.** An image built only on an Apple Silicon
 > machine will not start on an x86 server, and the failure — `exec format
@@ -243,14 +245,18 @@ package public: **Packages → share-stories → Package settings → Change
 visibility**. The image contains no credentials — `.env` and `data/` are
 excluded by `.dockerignore` — but it does disclose the source layout.
 
-Then point compose at the published image instead of building:
+Then point compose at the published image instead of building — replace both
+lines, since `image:` currently names the local build:
 
 ```yaml
 services:
   bridge:
-    image: ghcr.io/pepebits/share-stories:latest
-    # build: .        ← remove or comment out
+    # build: .                                   ← remove
+    image: ghcr.io/pepebits/share-stories:1.0.0  # was: share-stories
 ```
+
+Pin the exact version rather than `latest`, so an update is something you do on
+purpose.
 
 ### Also publishing to Docker Hub
 
@@ -301,11 +307,15 @@ docker buildx build \
 ## Production without Docker (systemd)
 
 `share-stories.service` is included and already hardened: dedicated user,
-`ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges`.
+`ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges`. The unit only
+grants write access to `/opt/share-stories/data`, so that directory has to
+exist before the first start.
 
 ```bash
 sudo useradd -r -s /bin/false share-stories
+sudo mkdir -p /opt/share-stories/data
 sudo cp -r dist node_modules package.json .env /opt/share-stories/
+sudo cp data/telegram-session.txt /opt/share-stories/data/
 sudo chown -R share-stories:share-stories /opt/share-stories
 sudo cp share-stories.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now share-stories
@@ -319,8 +329,13 @@ cloudflared as a service, or nginx/Caddy terminating TLS.
 ## Operating it
 
 **Logs.** Everything goes to stdout (`docker compose logs`, `journalctl -u
-share-stories`). Nothing else reports failures: if the bridge stops
-publishing, only the log will say so.
+share-stories`). Only the log has the detail, so look there first.
+
+**Alerts.** Two conditions are also reported to the Telegram account's Saved
+Messages, since nobody watches a log: `ALERT_AFTER_FAILURES` publishes failing
+in a row (default 3; `0` turns it off), with one more message when a story goes
+through again, and an Instagram token under 7 days from expiry that keeps
+failing to refresh. Each fires once per incident, not every cycle.
 
 **Backups.** `./data` is the only stateful thing. Both credential files are
 mode `0600`.
@@ -331,6 +346,10 @@ mode `0600`.
 git pull
 docker compose up -d --build      # or: pnpm install && pnpm run build && restart
 ```
+
+Running the published image instead: bump the version in the compose file, then
+`docker compose pull && docker compose up -d`. The database schema and the
+token file are migrated on startup, so `./data` needs nothing done to it.
 
 **Quota.** 100 publishes per rolling 24h, and stories count. The bridge checks
 before each publish and pauses when exhausted rather than failing the story.
