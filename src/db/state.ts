@@ -97,8 +97,7 @@ export class StateStore {
          LIMIT 1`
       )
       .get(storyId, sourcePlatform, targetPlatform) as
-      | { status: StoryStatus; attempts?: number; processed_at?: string | null }
-      | undefined;
+      { status: StoryStatus; attempts?: number; processed_at?: string | null } | undefined;
 
     if (!row) return 'ready';
     if (row.status === 'posted' || row.status === 'processing') return 'done';
