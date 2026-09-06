@@ -39,7 +39,7 @@
     "@types/node": "^24.13.3",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
-    "eslint": "^9.16.0",
+    "eslint": "^10.9.1",
     "globals": "^17.9.0",
     "prettier": "^3.9.6",
     "tsx": "^4.22.4",
