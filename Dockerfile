@@ -32,7 +32,7 @@ RUN pnpm install --frozen-lockfile --prod
 # That image also carries npm and corepack (~19MB) which nothing runs in
 # production, and deleting them in a later layer would not shrink anything —
 # they would still sit in the parent layer.
-FROM alpine:3.21
+FROM alpine:3.24
 
 LABEL org.opencontainers.image.title="share-stories" \
       org.opencontainers.image.description="Reposts Telegram stories to Instagram" \
