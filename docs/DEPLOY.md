@@ -232,18 +232,17 @@ ships with an SBOM and signed provenance attached.
 
 ### Pulling it
 
-The package inherits the repository's visibility. While the repo is private,
-anyone pulling needs to authenticate:
+Both registries are public, so no login is needed:
 
 ```bash
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
-docker pull ghcr.io/pepebits/share-stories:latest
+docker pull pepebits/share-stories:1.0.0            # Docker Hub
+docker pull ghcr.io/pepebits/share-stories:1.0.0    # GitHub Container Registry
 ```
 
-The token needs `read:packages`. To let someone pull without one, make the
-package public: **Packages → share-stories → Package settings → Change
-visibility**. The image contains no credentials — `.env` and `data/` are
-excluded by `.dockerignore` — but it does disclose the source layout.
+The image contains no credentials — `.env` and `data/` are excluded by
+`.dockerignore`. If you publish your own fork, note that a ghcr.io package
+starts out private regardless of the repository, and is made public under
+**Packages → share-stories → Package settings → Change visibility**.
 
 Then point compose at the published image instead of building — replace both
 lines, since `image:` currently names the local build:
@@ -282,8 +281,8 @@ those steps are skipped and nothing changes.
 
 > **Docker Hub's free plan is public.** Anyone can pull the image. It carries
 > no credentials — `.dockerignore` excludes `.env` and `data/` — but it does
-> disclose the source. ghcr.io inherits the repository's visibility instead,
-> which is why it is the default here.
+> disclose the source, so keep that in mind for a fork you do not intend to
+> open up. ghcr.io needs no extra account, which is why it is the default.
 
 ### Publishing by hand
 
