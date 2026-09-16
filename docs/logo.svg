@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="share-stories">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2AABEE"/>
+      <stop offset="0.55" stop-color="#A24BD6"/>
+      <stop offset="1" stop-color="#F0645A"/>
+    </linearGradient>
+  </defs>
+  <!-- A story ring, open where the story leaves it. -->
+  <circle cx="128" cy="128" r="104" fill="none" stroke="url(#g)" stroke-width="16"
+          stroke-linecap="round" stroke-dasharray="560 94" transform="rotate(25.5 128 128)"/>
+  <!-- The crossing. -->
+  <path d="M64 128 H180 M148 96 l38 32 -38 32" fill="none" stroke="url(#g)" stroke-width="20"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

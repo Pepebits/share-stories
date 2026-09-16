@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" alt="" width="128"></p>
+
 # Share Stories
 
 Reposts stories from monitored Telegram peers to Instagram, using Instagram's
