@@ -1,6 +1,4 @@
-<p align="center"><img src="docs/logo.svg" alt="" width="128"></p>
-
-# Share Stories
+<p align="center"><img src="docs/banner.png" alt="share-stories" width="720"></p>
 
 Reposts stories from monitored Telegram peers to Instagram, using Instagram's
 official Content Publishing API.
