@@ -302,7 +302,7 @@ export async function refreshAccessToken(
       timeout: 15_000,
     });
   } catch (error) {
-    throw new Error(`Token refresh rejected: ${describeError(error)}`);
+    throw new Error(`Token refresh rejected: ${describeError(error)}`, { cause: error });
   }
 
   const accessToken = response.data?.access_token;
