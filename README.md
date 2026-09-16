@@ -215,6 +215,14 @@ pure `telegram/feed.ts` module, which is tested, and the startup path in
 - **One account per install**: there is no multi-tenancy, by design — see
   *Before you share this*.
 
+## Contributing
+
+`pnpm run verify` is what CI runs; a pull request is expected to pass it.
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+— `fix(telegram): …`, `docs: …`, `ci: …` — with the subject saying why, not
+just what. Security problems go through [SECURITY.md](SECURITY.md), not the
+issue tracker.
+
 ## License
 
 MIT

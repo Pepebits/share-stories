@@ -4,11 +4,17 @@ version: 2
 # for the next release anyway: one monthly batch to review beats a trickle.
 # Minor and patch updates share one pull request; a major gets its own, since
 # it is the one that needs reading rather than a green build.
+#
+# Commits follow Conventional Commits; "chore" plus the scope Dependabot adds
+# gives "chore(deps):" and "chore(deps-dev):".
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
     groups:
       minor-and-patch:
         patterns: ['*']
@@ -24,6 +30,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
     groups:
       minor-and-patch:
         patterns: ['*']
@@ -33,6 +42,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
     # The Node major is pinned on purpose: package.json "engines" and the
     # final stage's copied binary both assume it. Bumping it is a release
     # decision, made together with those.

@@ -216,7 +216,7 @@ Tagging a release builds and pushes to GitHub Container Registry, and to Docker
 Hub when that is configured (below):
 
 ```bash
-git tag v1.1.0
+git tag v1.0.0
 git push --tags
 ```
 
@@ -358,4 +358,4 @@ before each publish and pauses when exhausted rather than failing the story.
 | `Instagram credentials rejected` at startup | Token expired or revoked — see [INSTAGRAM_SETUP.md](INSTAGRAM_SETUP.md). |
 | Startup fails with "Telegram session is missing or revoked" | The session was never authenticated, `./data` is not mounted, or it was revoked from **Settings → Devices**. Run `pnpm run login` again. |
 | Nothing is bridged, no errors | `TELEGRAM_MONITORED_PEERS` matches nothing. Run `pnpm run inspect`. |
-| A story was never published and never retried | Fixed: interrupted stories are recovered at startup. Older versions could leave one stuck. |
+| A story was never published and never retried | It failed five times and was written off — the log says so. Stories interrupted by a crash are recovered at startup, so they do not get stuck. |
