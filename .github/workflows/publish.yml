@@ -20,7 +20,7 @@ jobs:
   # tag on a commit that was never green — or never pushed to main — would
   # still publish an image.
   verify:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -49,7 +49,7 @@ jobs:
 
   publish:
     needs: verify
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     env:

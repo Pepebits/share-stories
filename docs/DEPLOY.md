@@ -279,11 +279,6 @@ those steps are skipped and nothing changes.
 > history, in `~/.docker/config.json`, and in whatever backs that machine up.
 > It also means CI does the multi-architecture build, which is far quicker
 > than emulating amd64 on an Apple Silicon laptop.
->
-> One caveat specific to this setup: the runner is **self-hosted**, so secrets
-> are decrypted onto that machine while a job runs. Anyone with access to it
-> can read them. That is acceptable for a private repository you control; it
-> would not be for a public one, where a fork could run code on your runner.
 
 > **Docker Hub's free plan is public.** Anyone can pull the image. It carries
 > no credentials — `.dockerignore` excludes `.env` and `data/` — but it does

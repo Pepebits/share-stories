@@ -6,17 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-# ⚠️ Runs on a self-hosted runner — our own VPS — which is only safe while
-# this repository is PRIVATE. Nobody outside can open a pull request, so no
-# untrusted code reaches the machine.
+# GitHub-hosted runners only. A pull request from a fork executes whatever
+# code it contains, and on a self-hosted runner that would mean executing it
+# on our own machine; requiring approval does not help, since approving a
+# malicious pull request runs it just the same.
 #
-# If it is ever made public, move these jobs back to `ubuntu-latest` first.
-# A pull request from a fork executes whatever code it contains, and on a
-# self-hosted runner that means executing it on the VPS. Requiring approval
-# does not help: approving a malicious pull request runs it just the same.
-#
-# The suite binds fixed ports (25790-25811). Two runs sharing the runner
-# would collide on them, so only one is allowed in flight per ref.
+# A newer push to the same ref makes the older run's answer irrelevant.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -26,19 +21,15 @@ permissions:
 
 jobs:
   verify:
-    runs-on: [self-hosted, Linux, X64]
-    # A hung job blocks every later run on a self-hosted runner, unlike a
-    # hosted one that is torn down regardless.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7
 
       # Downloads pnpm's self-contained binary (version from package.json
-      # "packageManager") and installs Node through it, so nothing here uses
-      # the npm the runner bundles: its self-update flattens the npm/npx/
-      # corepack symlinks into broken files (actions/runner#2094).
-      # No store cache: on a self-hosted runner the store already persists.
+      # "packageManager") and installs Node through it, so the runner's own
+      # npm and corepack never enter the picture.
       - uses: pnpm/setup@v2
         with:
           runtime: node@24
@@ -65,7 +56,7 @@ jobs:
         run: pnpm test
 
   audit:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -88,7 +79,7 @@ jobs:
   # Builds the runtime image and scans it. Kept out of `verify` so a new CVE
   # in a base layer is visibly a different failure from a broken test.
   scan:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
