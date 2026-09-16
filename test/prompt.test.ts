@@ -62,7 +62,7 @@ describe('prompt', () => {
         () => prompt('Telegram login code: ', false, headless),
         (error: Error) => {
           assert.ok(error instanceof NonInteractiveError);
-          assert.match(error.message, /TELEGRAM_SESSION_STRING/);
+          assert.match(error.message, /pnpm run login/);
           return true;
         }
       );

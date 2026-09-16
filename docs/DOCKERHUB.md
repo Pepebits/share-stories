@@ -57,7 +57,7 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 | Variable | Default | What it does |
 |---|---|---|
 | `TELEGRAM_SESSION_FILE` | `./data/telegram-session.txt` | Where the session written by the one-off login lives — see below. Also where the bridge saves it when Telegram rotates it. |
-| `TELEGRAM_SESSION_STRING` | — | The session as a string, for environments with no volume. Goes stale once Telegram rotates the session; the file is the better home. |
+| `TELEGRAM_SESSION_STRING` | — | Seed for a first start without the session file. Read only while the file does not exist; the bridge writes the file on the first connection and the file wins from then on, since it follows Telegram's session rotation. |
 | `TELEGRAM_STORY_SCOPES` | `all` | Which story audiences to carry: `public`, `contacts`, `selectedContacts`, `closeFriends`, comma-separated, or `all`. A value that cannot be parsed falls back to `public`. |
 | `ALERT_AFTER_FAILURES` | `3` | After this many consecutive publish failures, a warning is sent to the Telegram account's Saved Messages. `0` disables it. |
 | `MEDIA_SERVER_HOST` | `127.0.0.1` | **Set to `0.0.0.0` in Docker** — loopback is unreachable from another container |

@@ -10,6 +10,23 @@ export function readSession(path: string): string {
   }
 }
 
+export type SessionSource = 'file' | 'env' | 'none';
+
+/**
+ * The file wins whenever it exists: the bridge rewrites it when Telegram rotates the session,
+ * while an environment variable stays frozen at whatever it was when the process was launched.
+ * The variable is only a seed for a first start without the file.
+ */
+export function resolveSession(
+  path: string,
+  fromEnv: string | undefined
+): { session: string; source: SessionSource } {
+  const fromFile = readSession(path);
+  if (fromFile) return { session: fromFile, source: 'file' };
+  const seed = fromEnv?.trim() ?? '';
+  return seed ? { session: seed, source: 'env' } : { session: '', source: 'none' };
+}
+
 // Written via a temp file + rename so a crash mid-write can never leave a
 // truncated session on disk — GramJS would treat that as a corrupt session
 // rather than a missing one.

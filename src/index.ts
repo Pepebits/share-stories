@@ -90,15 +90,20 @@ async function main(): Promise<void> {
   deliverAlert = (text) => void reader.notifySelf(text);
   if (pendingAlert) deliverAlert(pendingAlert);
 
-  if (sessionString !== config.telegram.sessionString) {
+  // The file is what every later start reads, so it must hold the session Telegram just
+  // accepted: a rotated one, or the seed from TELEGRAM_SESSION_STRING on a first start.
+  if (config.telegram.sessionSource === 'env') {
+    writeSession(config.telegram.sessionFile, sessionString);
+    logger.info(
+      'Telegram session saved; TELEGRAM_SESSION_STRING is no longer read and can be removed.',
+      { path: config.telegram.sessionFile }
+    );
+  } else if (sessionString !== config.telegram.sessionString) {
     writeSession(config.telegram.sessionFile, sessionString);
     logger.info('Telegram session updated', { path: config.telegram.sessionFile });
-    if (process.env.TELEGRAM_SESSION_STRING) {
-      logger.warn(
-        'TELEGRAM_SESSION_STRING in the environment is now stale; remove it and the session ' +
-          'file will be used.'
-      );
-    }
+  }
+  if (config.telegram.sessionSource === 'file' && process.env.TELEGRAM_SESSION_STRING) {
+    logger.warn('TELEGRAM_SESSION_STRING is ignored because the session file exists; remove it.');
   }
 
   const quota = new QuotaGuard(

@@ -1,5 +1,5 @@
 import { parseScopes, type StoryScope } from './telegram/scope.js';
-import { readSession } from './telegram/session.js';
+import { resolveSession, type SessionSource } from './telegram/session.js';
 import { loadDotEnv } from './utils/env.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -43,6 +43,8 @@ export interface TelegramConfig {
   apiHash: string;
   phoneNumber: string;
   sessionString: string;
+  /** Where sessionString came from; the file is preferred, the variable only seeds it. */
+  sessionSource: SessionSource;
   /** Absolute path. `pnpm run login` writes here; the bridge reads it back. */
   sessionFile: string;
   monitoredPeers: string[];
@@ -137,7 +139,7 @@ export function loadConfig(): AppConfig {
     projectRoot,
     optionalEnv('TELEGRAM_SESSION_FILE', './data/telegram-session.txt')
   );
-  const sessionEnv = optionalEnv('TELEGRAM_SESSION_STRING');
+  const session = resolveSession(sessionFile, process.env.TELEGRAM_SESSION_STRING);
 
   return {
     projectRoot,
@@ -145,7 +147,8 @@ export function loadConfig(): AppConfig {
       apiId: requireApiId(),
       apiHash: requireEnv('TELEGRAM_API_HASH'),
       phoneNumber: requireEnv('TELEGRAM_PHONE_NUMBER'),
-      sessionString: sessionEnv || readSession(sessionFile),
+      sessionString: session.session,
+      sessionSource: session.source,
       sessionFile,
       monitoredPeers: parseListEnv('TELEGRAM_MONITORED_PEERS'),
       allowedScopes: parseScopes(process.env.TELEGRAM_STORY_SCOPES),

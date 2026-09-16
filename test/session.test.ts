@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSession, writeSession } from '../src/telegram/session.js';
+import { readSession, resolveSession, writeSession } from '../src/telegram/session.js';
 
 describe('telegram session file', () => {
   let dir: string;
@@ -47,5 +47,24 @@ describe('telegram session file', () => {
     const path = join(dir, 'nested', 'deeper', 'telegram-session.txt');
     writeSession(path, 'abc123');
     assert.equal(readSession(path), 'abc123');
+  });
+
+  describe('resolveSession', () => {
+    it('prefers the file over the environment, since only the file follows rotation', () => {
+      const path = join(dir, 'telegram-session.txt');
+      writeSession(path, 'rotated');
+      assert.deepEqual(resolveSession(path, 'stale-env'), { session: 'rotated', source: 'file' });
+    });
+
+    it('falls back to the environment when there is no file yet', () => {
+      const path = join(dir, 'telegram-session.txt');
+      assert.deepEqual(resolveSession(path, ' seed '), { session: 'seed', source: 'env' });
+    });
+
+    it('reports nothing when neither is set', () => {
+      const path = join(dir, 'telegram-session.txt');
+      assert.deepEqual(resolveSession(path, undefined), { session: '', source: 'none' });
+      assert.deepEqual(resolveSession(path, ''), { session: '', source: 'none' });
+    });
   });
 });

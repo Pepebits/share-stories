@@ -7,17 +7,24 @@
  */
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import { resolve } from 'node:path';
 import { loadDotEnv } from '../src/utils/env.js';
 import { namesOf, peerLabel, type RawPeer } from '../src/telegram/feed.js';
+import { resolveSession } from '../src/telegram/session.js';
 
 loadDotEnv();
 
 const apiId = Number(process.env.TELEGRAM_API_ID ?? 0);
 const apiHash = process.env.TELEGRAM_API_HASH ?? '';
-const sessionString = process.env.TELEGRAM_SESSION_STRING ?? '';
+const sessionFile = resolve(process.env.TELEGRAM_SESSION_FILE ?? './data/telegram-session.txt');
+const { session: sessionString } = resolveSession(sessionFile, process.env.TELEGRAM_SESSION_STRING);
 
-if (!apiId || !apiHash || !sessionString) {
-  console.error('Needs TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_SESSION_STRING in .env');
+if (!apiId || !apiHash) {
+  console.error('Needs TELEGRAM_API_ID and TELEGRAM_API_HASH in .env');
+  process.exit(1);
+}
+if (!sessionString) {
+  console.error(`No Telegram session at ${sessionFile}. Run \`pnpm run login\` first.`);
   process.exit(1);
 }
 

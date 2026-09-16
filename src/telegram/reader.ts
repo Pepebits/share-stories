@@ -70,8 +70,8 @@ export class TelegramStoryReader implements StorySource {
       await this.client.disconnect();
       this.client = null;
       throw new TelegramSessionError(
-        'Telegram session is missing or revoked. Run `pnpm run login` and put the result in ' +
-          'TELEGRAM_SESSION_FILE (or TELEGRAM_SESSION_STRING).'
+        'Telegram session is missing or revoked. Run `pnpm run login`; it writes the session ' +
+          'file at TELEGRAM_SESSION_FILE.'
       );
     }
 

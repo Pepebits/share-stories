@@ -26,8 +26,7 @@ export async function prompt(
   if (!isInteractive(io)) {
     throw new NonInteractiveError(
       `Cannot ask for "${question.trim()}" without a terminal. ` +
-        'Run the app interactively once to authenticate, then put the resulting ' +
-        'session string in TELEGRAM_SESSION_STRING.'
+        'Run `pnpm run login` in a terminal once; it writes the session file the bridge reads.'
     );
   }
 
