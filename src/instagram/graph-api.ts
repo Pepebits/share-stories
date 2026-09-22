@@ -144,6 +144,21 @@ async function createContainer(
   return String(containerId);
 }
 
+/** The status poll shared by waitForContainer and the lost-response check in publishContainer. */
+async function readContainerStatus(
+  containerId: string,
+  config: InstagramPublishConfig
+): Promise<{ status?: ContainerStatus; detail?: string }> {
+  const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
+    params: { fields: 'status_code,status' },
+    headers: authHeaders(config),
+    timeout: 15_000,
+  });
+  // `status` carries Meta's own sentence about what went wrong; status_code alone only
+  // ever says ERROR.
+  return { status: response.data?.status_code, detail: response.data?.status };
+}
+
 async function waitForContainer(
   containerId: string,
   config: InstagramPublishConfig,
@@ -156,18 +171,10 @@ async function waitForContainer(
     const delay = timing.pollDelaysMs[Math.min(attempt, timing.pollDelaysMs.length - 1)];
     await new Promise((resolve) => setTimeout(resolve, delay));
 
-    let status: ContainerStatus;
-    // `status` carries Meta's own sentence about what went wrong; status_code alone only
-    // ever says ERROR.
+    let status: ContainerStatus | undefined;
     let detail: string | undefined;
     try {
-      const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
-        params: { fields: 'status_code,status' },
-        headers: authHeaders(config),
-        timeout: 15_000,
-      });
-      status = response.data?.status_code;
-      detail = response.data?.status;
+      ({ status, detail } = await readContainerStatus(containerId, config));
     } catch (error) {
       if (isPermanent(error)) {
         throw new PermanentError(describeError(error));
@@ -199,14 +206,53 @@ async function waitForContainer(
   throw new Error(`Container ${containerId} did not finish before the publish timeout`);
 }
 
+/**
+ * A retry of media_publish cannot tell "Meta never got the request" from "Meta committed it
+ * and the response was lost" (timeout, 5xx after commit) — and posting again in the second
+ * case duplicates the story. Asking the container settles it: status_code flips to PUBLISHED
+ * the moment the publish commits, independently of whether its response ever reached us.
+ */
+async function wasAlreadyPublished(
+  containerId: string,
+  config: InstagramPublishConfig,
+  logger: Logger
+): Promise<boolean> {
+  try {
+    const { status } = await readContainerStatus(containerId, config);
+    if (status !== 'PUBLISHED') return false;
+
+    logger.warn(
+      'media_publish response was lost, but the container already shows PUBLISHED; treating ' +
+        'the retry as unnecessary rather than risk posting the story twice',
+      { containerId }
+    );
+    return true;
+  } catch (error) {
+    // Could not confirm either way; fall through and let the normal POST retry run its course.
+    logger.debug('Could not confirm container status before retrying media_publish', {
+      containerId,
+      error: describeError(error),
+    });
+    return false;
+  }
+}
+
 async function publishContainer(
   containerId: string,
   config: InstagramPublishConfig,
   timing: PublishTiming,
   logger: Logger
 ): Promise<string> {
+  let attempt = 0;
+
   const response = await withRetry(
     async () => {
+      attempt++;
+      // The media id isn't available from the container, so the container id stands in for it.
+      if (attempt > 1 && (await wasAlreadyPublished(containerId, config, logger))) {
+        return { data: { id: containerId } };
+      }
+
       try {
         return await axios.post(
           `${baseUrl(config)}/${config.accountId}/media_publish`,

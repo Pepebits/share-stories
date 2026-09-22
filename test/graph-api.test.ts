@@ -245,6 +245,24 @@ describe('publishStory', () => {
       const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
       assert.equal(mediaId, 'published_media_1');
     });
+
+    // Regression: retrying media_publish blind after a lost response either double-posts the
+    // story (Meta already committed it) or turns "already published" into a permanent failure
+    // that a later cycle retries with a fresh container — a duplicate story either way.
+    it('treats a lost publish response as success once the container reads PUBLISHED', async () => {
+      meta.publishResponses = [{ status: 500, body: { error: { message: 'Internal error' } } }];
+      // First GET is waitForContainer's poll; the retry's confirmation check gets the second.
+      meta.statusSequence = ['FINISHED', 'PUBLISHED'];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'container_1', 'falls back to the container id; no media id exists');
+      assert.equal(
+        meta.callsTo('POST', '/media_publish').length,
+        1,
+        'must not publish the container a second time'
+      );
+    });
   });
 
   // The hosted URL is an unauthenticated handle on the media; leaving it live
