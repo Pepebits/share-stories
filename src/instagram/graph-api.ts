@@ -75,6 +75,11 @@ function describeError(error: unknown): string {
   return errorMessage(error);
 }
 
+// Meta reports rate limiting and other transient conditions as an ordinary 400 or 403 rather
+// than 429 or a 5xx: application request limit, API too many calls, temporary block/OAuth
+// issue, and pending/reduced-capacity codes. Retrying these behaves the same as a 5xx.
+const TRANSIENT_ERROR_CODES = new Set([1, 2, 4, 17, 32, 341, 613]);
+
 /**
  * An access token or permission problem will fail identically on every retry,
  * so retrying only delays the log line that explains what to fix.
@@ -82,7 +87,15 @@ function describeError(error: unknown): string {
 function isPermanent(error: unknown): boolean {
   if (!(error instanceof AxiosError)) return false;
   const status = error.response?.status;
-  return status !== undefined && status >= 400 && status < 500 && status !== 429;
+  if (status === undefined || status < 400 || status >= 500 || status === 429) return false;
+
+  const metaError = error.response?.data?.error;
+  if (metaError?.is_transient === true) return false;
+  if (typeof metaError?.code === 'number' && TRANSIENT_ERROR_CODES.has(metaError.code)) {
+    return false;
+  }
+
+  return true;
 }
 
 function asPermanentIfHopeless(error: unknown): never {

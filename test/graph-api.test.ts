@@ -238,6 +238,32 @@ describe('publishStory', () => {
       assert.equal(meta.callsTo('POST', '/media_publish').length, 2);
     });
 
+    // Regression: Meta sends rate limiting as a plain 400, not 429, and the client used to
+    // read every 4xx as permanent and give up after one attempt.
+    it('retries a 400 flagged is_transient', async () => {
+      meta.createResponses = [
+        {
+          status: 400,
+          body: { error: { message: 'Please retry', code: 99999, is_transient: true } },
+        },
+      ];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 2);
+    });
+
+    it('retries a 400 carrying a known transient error code', async () => {
+      // Code 4: "Application request limit reached" — sent as a 400, never a 429.
+      meta.createResponses = [metaError(400, 'Application request limit reached', 4)];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 2);
+    });
+
     it('keeps polling through a transient status read failure', async () => {
       meta.statusResponses = [{ status: 503, body: { error: { message: 'try later' } } }];
       meta.statusSequence = ['FINISHED'];
