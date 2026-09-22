@@ -3,7 +3,7 @@ import { createLogger } from './utils/logger.js';
 import { StateStore } from './db/state.js';
 import { TelegramStoryReader, TelegramSessionError } from './telegram/reader.js';
 import { writeSession } from './telegram/session.js';
-import { getAccountInfo } from './instagram/graph-api.js';
+import { getAccountInfo, PermanentError } from './instagram/graph-api.js';
 import { TokenManager, DEFAULT_TOKEN_OPTIONS } from './instagram/token-manager.js';
 import { QuotaGuard } from './instagram/quota.js';
 import { MediaServer } from './http/media-server.js';
@@ -62,12 +62,20 @@ async function main(): Promise<void> {
   tokens.start();
 
   // Verify the token before a story ever arrives, so a bad one surfaces at boot, not at 3am.
-  const account = await getAccountInfo(tokens.config(), logger);
-  if (!account) {
-    throw new Error(
-      'Instagram credentials rejected. Check INSTAGRAM_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN ' +
-        '(long-lived tokens expire after 60 days).'
-    );
+  // getAccountInfo already retried through anything transient, so whatever it throws here is
+  // either a rejected credential or Meta being unreachable after those retries.
+  let account: { id: string; username: string };
+  try {
+    account = await getAccountInfo(tokens.config(), logger);
+  } catch (error) {
+    if (error instanceof PermanentError) {
+      throw new Error(
+        'Instagram credentials rejected. Check INSTAGRAM_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN ' +
+          `(long-lived tokens expire after 60 days). ${error.message}`,
+        { cause: error }
+      );
+    }
+    throw error;
   }
   logger.info(`Instagram account ready: @${account.username}`);
 

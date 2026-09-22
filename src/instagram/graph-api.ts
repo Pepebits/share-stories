@@ -419,23 +419,49 @@ export async function getPublishingLimit(
   };
 }
 
+// Kept short and fixed rather than exposed as a parameter: this only runs once, at boot, so
+// there is no caller who would ever want to tune it.
+const ACCOUNT_INFO_RETRY = { maxRetries: 2, baseDelayMs: 1_000, maxDelayMs: 4_000 };
+
 /**
- * Fetch the authenticated account, used at startup to prove the token works
- * before any story arrives.
+ * Fetch the authenticated account, used at startup to prove the token works before any story
+ * arrives. Throws rather than returning null so the caller can tell a rejected credential
+ * (PermanentError — retrying will not help) from a network blip that outlasted a few retries.
  */
 export async function getAccountInfo(
   config: InstagramPublishConfig,
   logger: Logger
-): Promise<{ id: string; username: string } | null> {
+): Promise<{ id: string; username: string }> {
   try {
-    const response = await axios.get(`${baseUrl(config)}/${config.accountId}`, {
-      params: { fields: 'id,username' },
-      headers: authHeaders(config),
-      timeout: 15_000,
-    });
+    const response = await withRetry(
+      async () => {
+        try {
+          return await axios.get(`${baseUrl(config)}/${config.accountId}`, {
+            params: { fields: 'id,username' },
+            headers: authHeaders(config),
+            timeout: 15_000,
+          });
+        } catch (error) {
+          asPermanentIfHopeless(error);
+        }
+      },
+      {
+        ...ACCOUNT_INFO_RETRY,
+        logger,
+        operation: 'instagram-account-info',
+        shouldRetry: retryUnlessPermanent,
+      }
+    );
     return response.data;
   } catch (error) {
-    logger.error('Could not verify Instagram credentials', { error: describeError(error) });
-    return null;
+    if (error instanceof PermanentError) {
+      throw new PermanentError(`Instagram credentials rejected: ${error.message}`, {
+        cause: error,
+      });
+    }
+    throw new Error(
+      `Meta could not be reached to verify Instagram credentials: ${errorMessage(error)}`,
+      { cause: error }
+    );
   }
 }

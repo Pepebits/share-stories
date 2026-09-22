@@ -324,14 +324,59 @@ describe('getAccountInfo', () => {
     await meta.stop();
   });
 
-  it('returns null instead of throwing when the token is rejected', async () => {
+  it('throws a PermanentError, without retrying, when the token is rejected', async () => {
     meta.statusResponses = [metaError(401, 'Invalid token')];
 
+    await assert.rejects(
+      () =>
+        getAccountInfo(
+          { accountId: 'acct_1', accessToken: 'bad', apiBase: meta.url },
+          silentLogger
+        ),
+      (error: Error) => {
+        assert.ok(error instanceof PermanentError);
+        assert.match(error.message, /credentials rejected/);
+        assert.match(error.message, /Invalid token/);
+        return true;
+      }
+    );
+    assert.equal(meta.calls.length, 1, 'a rejected token must not be retried');
+  });
+
+  it('retries a transient failure and succeeds once Meta recovers', async () => {
+    meta.statusResponses = [
+      { status: 500, body: { error: { message: 'Internal error' } } },
+      { status: 200, body: { id: 'acct_1', username: 'realuser' } },
+    ];
+
     const info = await getAccountInfo(
-      { accountId: 'acct_1', accessToken: 'bad', apiBase: meta.url },
+      { accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url },
       silentLogger
     );
 
-    assert.equal(info, null);
+    assert.deepEqual(info, { id: 'acct_1', username: 'realuser' });
+    assert.equal(meta.calls.length, 2);
+  });
+
+  // A boot-time network blip must not read the same as a bad token.
+  it('reports Meta as unreachable, not credentials as rejected, once retries are exhausted', async () => {
+    meta.statusResponses = [
+      { status: 503, body: { error: { message: 'try later' } } },
+      { status: 503, body: { error: { message: 'try later' } } },
+      { status: 503, body: { error: { message: 'try later' } } },
+    ];
+
+    await assert.rejects(
+      () =>
+        getAccountInfo(
+          { accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url },
+          silentLogger
+        ),
+      (error: Error) => {
+        assert.ok(!(error instanceof PermanentError));
+        assert.match(error.message, /could not be reached/i);
+        return true;
+      }
+    );
   });
 });
