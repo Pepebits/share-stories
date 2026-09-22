@@ -105,6 +105,18 @@ function asPermanentIfHopeless(error: unknown): never {
   throw error instanceof AxiosError ? new Error(describeError(error)) : error;
 }
 
+/** The withRetry options createContainer and publishContainer both derive from `timing`. */
+function retryOptionsFor(operation: string, timing: PublishTiming, logger: Logger) {
+  return {
+    maxRetries: timing.maxRetries,
+    baseDelayMs: timing.retryBaseDelayMs,
+    maxDelayMs: timing.retryMaxDelayMs,
+    logger,
+    operation,
+    shouldRetry: retryUnlessPermanent,
+  };
+}
+
 async function createContainer(
   mediaUrl: string,
   media: StoryMedia,
@@ -138,14 +150,7 @@ async function createContainer(
         asPermanentIfHopeless(error);
       }
     },
-    {
-      maxRetries: timing.maxRetries,
-      baseDelayMs: timing.retryBaseDelayMs,
-      maxDelayMs: timing.retryMaxDelayMs,
-      logger,
-      operation: 'instagram-create-container',
-      shouldRetry: retryUnlessPermanent,
-    }
+    retryOptionsFor('instagram-create-container', timing, logger)
   );
 
   const containerId = response?.data?.id;
@@ -276,14 +281,7 @@ async function publishContainer(
         asPermanentIfHopeless(error);
       }
     },
-    {
-      maxRetries: timing.maxRetries,
-      baseDelayMs: timing.retryBaseDelayMs,
-      maxDelayMs: timing.retryMaxDelayMs,
-      logger,
-      operation: 'instagram-media-publish',
-      shouldRetry: retryUnlessPermanent,
-    }
+    retryOptionsFor('instagram-media-publish', timing, logger)
   );
 
   const mediaId = response?.data?.id;
