@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { createLogger } from './utils/logger.js';
 import { StateStore } from './db/state.js';
@@ -50,7 +49,7 @@ async function main(): Promise<void> {
   // refresh produced, not necessarily what is in .env.
   const tokens = new TokenManager(
     {
-      filePath: resolve(config.projectRoot, config.instagramTokenFile),
+      filePath: config.instagramTokenFile,
       envToken: config.instagram.accessToken,
       accountId: config.instagram.accountId,
       ...DEFAULT_TOKEN_OPTIONS,

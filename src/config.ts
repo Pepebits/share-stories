@@ -114,7 +114,6 @@ export interface AppConfig {
   databasePath: string;
   instagramTokenFile: string;
   logLevel: string;
-  projectRoot: string;
 }
 
 // Loopback, RFC 1918, link-local (169.254/16), carrier-grade NAT (100.64/10), and their IPv6
@@ -176,7 +175,6 @@ export function loadConfig(): AppConfig {
   const session = resolveSession(sessionFile, process.env.TELEGRAM_SESSION_STRING);
 
   return {
-    projectRoot,
     telegram: {
       apiId: requireApiId(),
       apiHash: requireEnv('TELEGRAM_API_HASH'),
@@ -202,8 +200,13 @@ export function loadConfig(): AppConfig {
     },
     pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120, 1),
     alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3, 0),
-    databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
-    instagramTokenFile: optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json'),
+    // Resolved here, like sessionFile above, so every path in AppConfig is absolute and
+    // independent of whatever directory the process happens to be started from.
+    databasePath: resolve(projectRoot, optionalEnv('DATABASE_PATH', './data/state.db')),
+    instagramTokenFile: resolve(
+      projectRoot,
+      optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json')
+    ),
     logLevel: validateLogLevel(process.env.LOG_LEVEL),
   };
 }
