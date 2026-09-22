@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTgToIgBridge, MAX_RECONNECT_FAILURES } from '../src/bridge/tg-to-ig.js';
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
+import { QuotaExceededError } from '../src/instagram/quota.js';
 import type { StorySource, StoryMedia } from '../src/telegram/types.js';
 import type { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
@@ -230,6 +231,37 @@ describe('createTgToIgBridge', () => {
 
       await pollOnce(bridge);
       assert.equal(fatal.length, 1, 'called exactly once at the threshold');
+    });
+  });
+
+  describe('quota', () => {
+    // Regression: ensureCapacity was only checked inside the for-await, i.e. after the reader
+    // had already downloaded the next story — so an exhausted quota still cost a download,
+    // every single cycle, only to throw the result away.
+    it('does not pull a story from the source when the quota is already exhausted', async () => {
+      const { reader, asked } = stubReader(['peer:1']);
+
+      const bridge = createTgToIgBridge(
+        reader,
+        neverPublishes,
+        store,
+        {
+          pollIntervalMs: 60_000,
+          monitoredPeers: ['@someone'],
+          alertAfterFailures: 0,
+          instagram: () => ({ accountId: '', accessToken: '' }),
+          quota: {
+            ensureCapacity: () => Promise.reject(QuotaExceededError.reached(100, 100, 0)),
+            recordPublish: () => {},
+          } as never,
+          onFatal: () => {},
+        },
+        silentLogger
+      );
+
+      await pollOnce(bridge);
+
+      assert.deepEqual(asked, [], 'the reader must never be asked while the quota is exhausted');
     });
   });
 

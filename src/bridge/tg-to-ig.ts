@@ -104,6 +104,24 @@ export function createTgToIgBridge(
     }
   };
 
+  /**
+   * "Come back later", not a failure: exceeding the quota must leave the story unprocessed for
+   * a later cycle, so QuotaExceededError is swallowed here (after being logged) rather than
+   * left for the outer catch to report as a cycle error.
+   */
+  const capacityAvailable = async (): Promise<boolean> => {
+    try {
+      await config.quota.ensureCapacity();
+      return true;
+    } catch (error) {
+      if (error instanceof QuotaExceededError) {
+        logger.warn(`${error.message}. Pausing until the window frees up.`);
+        return false;
+      }
+      throw error;
+    }
+  };
+
   const poll = async () => {
     if (!running || polling) return;
     polling = true;
@@ -127,6 +145,10 @@ export function createTgToIgBridge(
         }
       }
 
+      // Checked before the reader is asked for anything: without this, an exhausted quota was
+      // only noticed after a story had already been downloaded for nothing, every single cycle.
+      if (!(await capacityAvailable())) return;
+
       // The reader downloads whatever it yields, so "have we settled this already?" must be
       // answered before it fetches, not after.
       for await (const story of reader.stories(config.monitoredPeers, worthAttempting)) {
@@ -135,17 +157,9 @@ export function createTgToIgBridge(
         // Asked again since a peer's pending stories are all chosen before any download starts.
         if (!worthAttempting(story.id)) continue;
 
-        try {
-          // Checked before the story is touched: exceeding the quota is a "come back later",
-          // not a failure, so the story must stay unprocessed for a later cycle.
-          await config.quota.ensureCapacity();
-        } catch (error) {
-          if (error instanceof QuotaExceededError) {
-            logger.warn(`${error.message}. Pausing until the window frees up.`);
-            break;
-          }
-          throw error;
-        }
+        // Re-checked per story: publishing consumes quota mid-cycle, so capacity can run out
+        // partway through even though this cycle started with room to spare.
+        if (!(await capacityAvailable())) break;
 
         await publish(story);
       }
