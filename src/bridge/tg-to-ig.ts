@@ -1,5 +1,5 @@
 import { StorySource, StoryMedia } from '../telegram/types.js';
-import { publishStory, PermanentError } from '../instagram/graph-api.js';
+import { publishStory, PermanentError, PublishAbortedError } from '../instagram/graph-api.js';
 import { StateStore, MAX_ATTEMPTS } from '../db/state.js';
 import { Logger } from '../utils/logger.js';
 import { errorMessage } from '../utils/errors.js';
@@ -49,6 +49,10 @@ export function createTgToIgBridge(
   // Guards against a poll tick overlapping a publish that outlasts the interval.
   let polling = false;
   let current: Promise<void> = Promise.resolve();
+  // Aborted by stop() so a publish stuck waiting on its container does not block shutdown.
+  // Replaced with a fresh one afterwards, since an AbortController can't be un-aborted for a
+  // later start(). A publish already past that point ignores it — see graph-api.ts.
+  let abortController = new AbortController();
 
   // Never published, and not a failure waiting out its backoff or written off.
   const worthAttempting = (storyId: string): boolean =>
@@ -58,7 +62,14 @@ export function createTgToIgBridge(
     store.markProcessing(story.id, 'telegram', story.sourceUser, 'instagram');
 
     try {
-      const mediaId = await publishStory(story, config.instagram(), mediaServer, logger);
+      const mediaId = await publishStory(
+        story,
+        config.instagram(),
+        mediaServer,
+        logger,
+        undefined,
+        abortController.signal
+      );
       config.quota.recordPublish();
       store.markPosted(story.id, 'telegram', 'instagram');
       logger.info('TG→IG story bridged', {
@@ -73,6 +84,17 @@ export function createTgToIgBridge(
         void reader.notifySelf('✅ share-stories: publishing again, a story just went through.');
       }
     } catch (error) {
+      // Cut short by stop(), not a real failure: media_publish was never sent,
+      // so it must not cost an attempt, count toward consecutiveFailures, or trigger an alert —
+      // it will simply be tried again, at no disadvantage, on the next boot.
+      if (error instanceof PublishAbortedError) {
+        store.markInterrupted(story.id, 'telegram', 'instagram', errorMessage(error));
+        logger.info('TG→IG publish interrupted by shutdown; will retry next boot', {
+          storyId: story.id,
+        });
+        return;
+      }
+
       const message = errorMessage(error);
       store.markFailed(story.id, 'telegram', 'instagram', message);
       logger.error('TG→IG bridge failed for story', {
@@ -192,7 +214,12 @@ export function createTgToIgBridge(
         clearInterval(interval);
         interval = null;
       }
+      // Cuts a publish short if it's still waiting on its container; one already sending
+      // media_publish finishes regardless (see graph-api.ts), so this can still take a moment.
+      abortController.abort();
       await current;
+      // A controller is single-use; swap in a fresh one in case start() runs again.
+      abortController = new AbortController();
       logger.info('TG→IG bridge stopped');
     },
   };

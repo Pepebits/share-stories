@@ -37,7 +37,19 @@ export class PermanentError extends Error {
   readonly permanent = true;
 }
 
-const retryUnlessPermanent = (error: Error): boolean => !(error instanceof PermanentError);
+/**
+ * Marker for a publish cut short by `stop()`'s AbortSignal before media_publish was sent.
+ * Not a PermanentError: media_publish was never sent, so the story costs nothing and
+ * should be retried on the very next cycle, not written off or backed off.
+ */
+export class PublishAbortedError extends Error {
+  readonly aborted = true;
+}
+
+// Neither kind of failure benefits from a retry: a PermanentError will fail identically again,
+// and retrying an aborted request would defeat the point of aborting it.
+const retryUnlessPermanent = (error: Error): boolean =>
+  !(error instanceof PermanentError) && !(error instanceof PublishAbortedError);
 
 const baseUrl = (config: InstagramPublishConfig): string =>
   (config.apiBase ?? DEFAULT_API_BASE).replace(/\/+$/, '');
@@ -98,6 +110,11 @@ function isPermanent(error: unknown): boolean {
   return true;
 }
 
+/** True for the error axios throws when a request is cut off by its `signal` option. */
+function isAborted(error: unknown): boolean {
+  return axios.isCancel(error);
+}
+
 function asPermanentIfHopeless(error: unknown): never {
   if (isPermanent(error)) throw new PermanentError(describeError(error));
   // withRetry logs whatever message it is given, so it must be the described one, not
@@ -122,7 +139,8 @@ async function createContainer(
   media: StoryMedia,
   config: InstagramPublishConfig,
   timing: PublishTiming,
-  logger: Logger
+  logger: Logger,
+  signal?: AbortSignal
 ): Promise<string> {
   const payload: Record<string, string> = { media_type: 'STORIES' };
 
@@ -145,8 +163,12 @@ async function createContainer(
         return await axios.post(`${baseUrl(config)}/${config.accountId}/media`, payload, {
           headers: authHeaders(config),
           timeout: 30_000,
+          signal,
         });
       } catch (error) {
+        if (isAborted(error)) {
+          throw new PublishAbortedError('Publish aborted before the container was created');
+        }
         asPermanentIfHopeless(error);
       }
     },
@@ -165,35 +187,60 @@ async function createContainer(
 /** The status poll shared by waitForContainer and the lost-response check in publishContainer. */
 async function readContainerStatus(
   containerId: string,
-  config: InstagramPublishConfig
+  config: InstagramPublishConfig,
+  signal?: AbortSignal
 ): Promise<{ status?: ContainerStatus; detail?: string }> {
   const response = await axios.get(`${baseUrl(config)}/${containerId}`, {
     params: { fields: 'status_code,status' },
     headers: authHeaders(config),
     timeout: 15_000,
+    signal,
   });
   // `status` carries Meta's own sentence about what went wrong; status_code alone only
   // ever says ERROR.
   return { status: response.data?.status_code, detail: response.data?.status };
 }
 
+/** The poll sleep between container checks, cut short the moment `signal` aborts. */
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw new PublishAbortedError('Publish aborted while waiting to poll the container');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new PublishAbortedError('Publish aborted while waiting to poll the container'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function waitForContainer(
   containerId: string,
   config: InstagramPublishConfig,
   timing: PublishTiming,
-  logger: Logger
+  logger: Logger,
+  signal?: AbortSignal
 ): Promise<void> {
   const deadline = Date.now() + timing.pollTimeoutMs;
 
   for (let attempt = 0; Date.now() < deadline; attempt++) {
     const delay = timing.pollDelaysMs[Math.min(attempt, timing.pollDelaysMs.length - 1)];
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    await abortableDelay(delay, signal);
 
     let status: ContainerStatus | undefined;
     let detail: string | undefined;
     try {
-      ({ status, detail } = await readContainerStatus(containerId, config));
+      ({ status, detail } = await readContainerStatus(containerId, config, signal));
     } catch (error) {
+      if (isAborted(error)) {
+        throw new PublishAbortedError('Publish aborted while checking the container status');
+      }
       if (isPermanent(error)) {
         throw new PermanentError(describeError(error));
       }
@@ -296,7 +343,9 @@ export async function publishStory(
   config: InstagramPublishConfig,
   mediaServer: MediaServer,
   logger: Logger,
-  timing: PublishTiming = DEFAULT_TIMING
+  timing: PublishTiming = DEFAULT_TIMING,
+  // Honoured only up to the point media_publish is sent — see the comment above that call.
+  signal?: AbortSignal
 ): Promise<string> {
   if (!isPublishConfigured(config)) {
     throw new PermanentError(
@@ -325,17 +374,30 @@ export async function publishStory(
   });
 
   try {
-    const containerId = await createContainer(hosted.url, media, config, timing, logger);
-    await waitForContainer(containerId, config, timing, logger);
+    const containerId = await createContainer(hosted.url, media, config, timing, logger, signal);
+    await waitForContainer(containerId, config, timing, logger, signal);
+
+    // Once media_publish is sent it may already commit on Meta's side before the response
+    // gets back to us — see wasAlreadyPublished — so from here on an abort must not cut the
+    // request off, or a shutdown could duplicate the story on the next boot instead of just
+    // delaying it. This is the last point where honouring the signal is still free.
+    if (signal?.aborted) {
+      throw new PublishAbortedError('Publish aborted before media_publish was sent');
+    }
     const mediaId = await publishContainer(containerId, config, timing, logger);
 
     logger.info('Story published to Instagram', { storyId: media.id, mediaId });
     return mediaId;
   } catch (error) {
     const message = `Instagram publish failed: ${describeError(error)}`;
-    throw error instanceof PermanentError ? new PermanentError(message) : new Error(message);
+    if (error instanceof PermanentError) throw new PermanentError(message, { cause: error });
+    if (error instanceof PublishAbortedError) {
+      throw new PublishAbortedError(message, { cause: error });
+    }
+    throw new Error(message, { cause: error });
   } finally {
-    // A live URL after publish is a leak of the media.
+    // A live URL after publish is a leak of the media. An abandoned container needs no such
+    // cleanup: Meta expires an unpublished one on its own.
     hosted.release();
   }
 }

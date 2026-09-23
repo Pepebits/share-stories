@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { publishStory, PermanentError, getAccountInfo } from '../src/instagram/graph-api.js';
+import {
+  publishStory,
+  PermanentError,
+  PublishAbortedError,
+  getAccountInfo,
+} from '../src/instagram/graph-api.js';
 import { MediaServer } from '../src/http/media-server.js';
 import type { InstagramPublishConfig, PublishTiming } from '../src/instagram/types.js';
 import type { StoryMedia } from '../src/telegram/types.js';
@@ -288,6 +293,53 @@ describe('publishStory', () => {
         1,
         'must not publish the container a second time'
       );
+    });
+  });
+
+  // stop() aborts an in-flight publish so shutdown isn't held hostage by a slow one — but only
+  // up to the point media_publish is sent, past which Meta may already have committed it.
+  describe('cancellation', () => {
+    it('rejects promptly with PublishAbortedError when aborted during the container wait, without publishing', async () => {
+      // Never finishes on its own, so the only way this test settles is via the abort.
+      meta.statusSequence = ['IN_PROGRESS'];
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 20);
+
+      const before = Date.now();
+      await assert.rejects(
+        () => publishStory(story(), config, mediaServer, silentLogger, FAST, controller.signal),
+        PublishAbortedError
+      );
+      const elapsed = Date.now() - before;
+
+      assert.ok(
+        elapsed < FAST.pollTimeoutMs,
+        `must reject well before the ${FAST.pollTimeoutMs}ms poll timeout, took ${elapsed}ms`
+      );
+      assert.equal(
+        meta.callsTo('POST', '/media_publish').length,
+        0,
+        'must not publish once aborted'
+      );
+    });
+
+    it('lets media_publish finish once it has started, even if the signal fires mid-flight', async () => {
+      // Long enough that the abort below is guaranteed to land while the request is in flight.
+      meta.publishDelayMs = 150;
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 40);
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        controller.signal
+      );
+
+      assert.equal(mediaId, 'published_media_1', 'the publish must complete despite the abort');
+      assert.equal(meta.callsTo('POST', '/media_publish').length, 1);
     });
   });
 

@@ -49,6 +49,7 @@ export class StateStore {
   private readonly markProcessingStmt: StatementSync;
   private readonly markPostedStmt: StatementSync;
   private readonly markFailedStmt: StatementSync;
+  private readonly markInterruptedStmt: StatementSync;
   private readonly recoverStalledStmt: StatementSync;
   private readonly cleanupStmt: StatementSync;
 
@@ -81,6 +82,11 @@ export class StateStore {
       // successful publish clears it.
       `UPDATE stories SET status = 'failed', processed_at = datetime('now'),
               error_message = ?, attempts = attempts + 1
+       WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.markInterruptedStmt = this.db.prepare(
+      // Deliberately leaves attempts and processed_at untouched — see markInterrupted().
+      `UPDATE stories SET status = 'failed', error_message = ?
        WHERE story_id = ? AND platform = ? AND target_platform = ?`
     );
     this.recoverStalledStmt = this.db.prepare(
@@ -175,6 +181,23 @@ export class StateStore {
     errorMessage: string
   ): void {
     this.markFailedStmt.run(errorMessage, storyId, sourcePlatform, targetPlatform);
+  }
+
+  /**
+   * Sends one story back to 'failed' after a publish was cut short by shutdown before it could
+   * commit anything — as opposed to a real failure, this must cost nothing, so unlike
+   * markFailed() it leaves attempts and processed_at untouched: attempts keeps the backoff of
+   * any earlier real failure rather than restarting it, and a story with none yet stays
+   * attemptState() === 'ready' since attempts is still 0. Same shape as recoverStalled(),
+   * scoped to the one story stop() interrupted instead of every row left mid-publish at boot.
+   */
+  markInterrupted(
+    storyId: string,
+    sourcePlatform: Platform,
+    targetPlatform: Platform,
+    errorMessage: string
+  ): void {
+    this.markInterruptedStmt.run(errorMessage, storyId, sourcePlatform, targetPlatform);
   }
 
   /**
