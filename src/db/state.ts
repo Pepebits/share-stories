@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -43,6 +43,16 @@ export interface StoredStory {
 export class StateStore {
   private readonly db: DatabaseSync;
 
+  // Prepared once and reused: re-preparing on every call recompiles the same SQL every time,
+  // for statements that run on every story, every poll cycle.
+  private readonly attemptStateStmt: StatementSync;
+  private readonly markProcessingStmt: StatementSync;
+  private readonly markPostedStmt: StatementSync;
+  private readonly markFailedStmt: StatementSync;
+  private readonly markInterruptedStmt: StatementSync;
+  private readonly recoverStalledStmt: StatementSync;
+  private readonly cleanupStmt: StatementSync;
+
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
 
@@ -50,6 +60,44 @@ export class StateStore {
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.init();
+
+    this.attemptStateStmt = this.db.prepare(
+      `SELECT status, attempts, processed_at FROM stories
+       WHERE story_id = ? AND platform = ? AND target_platform = ?
+       LIMIT 1`
+    );
+    this.markProcessingStmt = this.db.prepare(
+      `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
+       VALUES (?, ?, ?, ?, 'processing')
+       ON CONFLICT(platform, story_id, target_platform)
+       DO UPDATE SET status = 'processing', error_message = NULL`
+    );
+    this.markPostedStmt = this.db.prepare(
+      `UPDATE stories SET status = 'posted', processed_at = datetime('now'),
+              error_message = NULL, attempts = 0
+       WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.markFailedStmt = this.db.prepare(
+      // attempts drives the backoff, so it accumulates across cycles; only a
+      // successful publish clears it.
+      `UPDATE stories SET status = 'failed', processed_at = datetime('now'),
+              error_message = ?, attempts = attempts + 1
+       WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.markInterruptedStmt = this.db.prepare(
+      // Deliberately leaves attempts and processed_at untouched — see markInterrupted().
+      `UPDATE stories SET status = 'failed', error_message = ?
+       WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.recoverStalledStmt = this.db.prepare(
+      `UPDATE stories SET status = 'failed', error_message = ?
+       WHERE status = 'processing'`
+    );
+    this.cleanupStmt = this.db.prepare(
+      `DELETE FROM stories
+       WHERE created_at < datetime('now', '-' || ? || ' days')
+         AND status IN ('posted', 'failed')`
+    );
   }
 
   private init(): void {
@@ -68,11 +116,12 @@ export class StateStore {
         UNIQUE(platform, story_id, target_platform)
       );
 
-      CREATE INDEX IF NOT EXISTS idx_stories_platform_id
-        ON stories(platform, story_id, target_platform);
-
       CREATE INDEX IF NOT EXISTS idx_stories_status
         ON stories(status);
+
+      -- SQLite already maintains an index backing the UNIQUE constraint above; this one only
+      -- ever duplicated it. Dropped for databases created before this stopped being created.
+      DROP INDEX IF EXISTS idx_stories_platform_id;
     `);
 
     // CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so a database from
@@ -90,13 +139,7 @@ export class StateStore {
    * stories into a flood of failed publishes against Meta.
    */
   attemptState(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): AttemptState {
-    const row = this.db
-      .prepare(
-        `SELECT status, attempts, processed_at FROM stories
-         WHERE story_id = ? AND platform = ? AND target_platform = ?
-         LIMIT 1`
-      )
-      .get(storyId, sourcePlatform, targetPlatform) as
+    const row = this.attemptStateStmt.get(storyId, sourcePlatform, targetPlatform) as
       { status: StoryStatus; attempts?: number; processed_at?: string | null } | undefined;
 
     if (!row) return 'ready';
@@ -124,24 +167,11 @@ export class StateStore {
   ): void {
     // Must move a retried story back to 'processing'; INSERT OR IGNORE would leave it
     // 'failed' for the whole attempt, so attemptState() would not protect it.
-    this.db
-      .prepare(
-        `INSERT INTO stories (story_id, platform, source_user, target_platform, status)
-         VALUES (?, ?, ?, ?, 'processing')
-         ON CONFLICT(platform, story_id, target_platform)
-         DO UPDATE SET status = 'processing', error_message = NULL`
-      )
-      .run(storyId, sourcePlatform, sourceUser, targetPlatform);
+    this.markProcessingStmt.run(storyId, sourcePlatform, sourceUser, targetPlatform);
   }
 
   markPosted(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): void {
-    this.db
-      .prepare(
-        `UPDATE stories SET status = 'posted', processed_at = datetime('now'),
-                error_message = NULL, attempts = 0
-         WHERE story_id = ? AND platform = ? AND target_platform = ?`
-      )
-      .run(storyId, sourcePlatform, targetPlatform);
+    this.markPostedStmt.run(storyId, sourcePlatform, targetPlatform);
   }
 
   markFailed(
@@ -150,15 +180,24 @@ export class StateStore {
     targetPlatform: Platform,
     errorMessage: string
   ): void {
-    this.db
-      .prepare(
-        // attempts drives the backoff, so it accumulates across cycles; only a
-        // successful publish clears it.
-        `UPDATE stories SET status = 'failed', processed_at = datetime('now'),
-                error_message = ?, attempts = attempts + 1
-         WHERE story_id = ? AND platform = ? AND target_platform = ?`
-      )
-      .run(errorMessage, storyId, sourcePlatform, targetPlatform);
+    this.markFailedStmt.run(errorMessage, storyId, sourcePlatform, targetPlatform);
+  }
+
+  /**
+   * Sends one story back to 'failed' after a publish was cut short by shutdown before it could
+   * commit anything — as opposed to a real failure, this must cost nothing, so unlike
+   * markFailed() it leaves attempts and processed_at untouched: attempts keeps the backoff of
+   * any earlier real failure rather than restarting it, and a story with none yet stays
+   * attemptState() === 'ready' since attempts is still 0. Same shape as recoverStalled(),
+   * scoped to the one story stop() interrupted instead of every row left mid-publish at boot.
+   */
+  markInterrupted(
+    storyId: string,
+    sourcePlatform: Platform,
+    targetPlatform: Platform,
+    errorMessage: string
+  ): void {
+    this.markInterruptedStmt.run(errorMessage, storyId, sourcePlatform, targetPlatform);
   }
 
   /**
@@ -167,12 +206,8 @@ export class StateStore {
    * attemptState() on that story forever; only one process owns this database.
    */
   recoverStalled(): number {
-    return this.db
-      .prepare(
-        `UPDATE stories SET status = 'failed', error_message = ?
-         WHERE status = 'processing'`
-      )
-      .run('Interrupted before it finished; will be retried').changes as number;
+    return this.recoverStalledStmt.run('Interrupted before it finished; will be retried')
+      .changes as number;
   }
 
   /**
@@ -180,13 +215,7 @@ export class StateStore {
    * expire after 24h — so old rows only cost space.
    */
   cleanup(daysOld: number = 30): number {
-    return this.db
-      .prepare(
-        `DELETE FROM stories
-         WHERE created_at < datetime('now', '-' || ? || ' days')
-           AND status IN ('posted', 'failed')`
-      )
-      .run(daysOld).changes as number;
+    return this.cleanupStmt.run(daysOld).changes as number;
   }
 
   close(): void {

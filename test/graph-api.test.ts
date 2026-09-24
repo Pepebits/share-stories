@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { publishStory, PermanentError, getAccountInfo } from '../src/instagram/graph-api.js';
+import {
+  publishStory,
+  PermanentError,
+  PublishAbortedError,
+  getAccountInfo,
+} from '../src/instagram/graph-api.js';
 import { MediaServer } from '../src/http/media-server.js';
 import type { InstagramPublishConfig, PublishTiming } from '../src/instagram/types.js';
 import type { StoryMedia } from '../src/telegram/types.js';
@@ -238,12 +243,103 @@ describe('publishStory', () => {
       assert.equal(meta.callsTo('POST', '/media_publish').length, 2);
     });
 
+    // Regression: Meta sends rate limiting as a plain 400, not 429, and the client used to
+    // read every 4xx as permanent and give up after one attempt.
+    it('retries a 400 flagged is_transient', async () => {
+      meta.createResponses = [
+        {
+          status: 400,
+          body: { error: { message: 'Please retry', code: 99999, is_transient: true } },
+        },
+      ];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 2);
+    });
+
+    it('retries a 400 carrying a known transient error code', async () => {
+      // Code 4: "Application request limit reached" — sent as a 400, never a 429.
+      meta.createResponses = [metaError(400, 'Application request limit reached', 4)];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 2);
+    });
+
     it('keeps polling through a transient status read failure', async () => {
       meta.statusResponses = [{ status: 503, body: { error: { message: 'try later' } } }];
       meta.statusSequence = ['FINISHED'];
 
       const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
       assert.equal(mediaId, 'published_media_1');
+    });
+
+    // Regression: retrying media_publish blind after a lost response either double-posts the
+    // story (Meta already committed it) or turns "already published" into a permanent failure
+    // that a later cycle retries with a fresh container — a duplicate story either way.
+    it('treats a lost publish response as success once the container reads PUBLISHED', async () => {
+      meta.publishResponses = [{ status: 500, body: { error: { message: 'Internal error' } } }];
+      // First GET is waitForContainer's poll; the retry's confirmation check gets the second.
+      meta.statusSequence = ['FINISHED', 'PUBLISHED'];
+
+      const mediaId = await publishStory(story(), config, mediaServer, silentLogger, FAST);
+
+      assert.equal(mediaId, 'container_1', 'falls back to the container id; no media id exists');
+      assert.equal(
+        meta.callsTo('POST', '/media_publish').length,
+        1,
+        'must not publish the container a second time'
+      );
+    });
+  });
+
+  // stop() aborts an in-flight publish so shutdown isn't held hostage by a slow one — but only
+  // up to the point media_publish is sent, past which Meta may already have committed it.
+  describe('cancellation', () => {
+    it('rejects promptly with PublishAbortedError when aborted during the container wait, without publishing', async () => {
+      // Never finishes on its own, so the only way this test settles is via the abort.
+      meta.statusSequence = ['IN_PROGRESS'];
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 20);
+
+      const before = Date.now();
+      await assert.rejects(
+        () => publishStory(story(), config, mediaServer, silentLogger, FAST, controller.signal),
+        PublishAbortedError
+      );
+      const elapsed = Date.now() - before;
+
+      assert.ok(
+        elapsed < FAST.pollTimeoutMs,
+        `must reject well before the ${FAST.pollTimeoutMs}ms poll timeout, took ${elapsed}ms`
+      );
+      assert.equal(
+        meta.callsTo('POST', '/media_publish').length,
+        0,
+        'must not publish once aborted'
+      );
+    });
+
+    it('lets media_publish finish once it has started, even if the signal fires mid-flight', async () => {
+      // Long enough that the abort below is guaranteed to land while the request is in flight.
+      meta.publishDelayMs = 150;
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 40);
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        controller.signal
+      );
+
+      assert.equal(mediaId, 'published_media_1', 'the publish must complete despite the abort');
+      assert.equal(meta.callsTo('POST', '/media_publish').length, 1);
     });
   });
 
@@ -280,14 +376,59 @@ describe('getAccountInfo', () => {
     await meta.stop();
   });
 
-  it('returns null instead of throwing when the token is rejected', async () => {
+  it('throws a PermanentError, without retrying, when the token is rejected', async () => {
     meta.statusResponses = [metaError(401, 'Invalid token')];
 
+    await assert.rejects(
+      () =>
+        getAccountInfo(
+          { accountId: 'acct_1', accessToken: 'bad', apiBase: meta.url },
+          silentLogger
+        ),
+      (error: Error) => {
+        assert.ok(error instanceof PermanentError);
+        assert.match(error.message, /credentials rejected/);
+        assert.match(error.message, /Invalid token/);
+        return true;
+      }
+    );
+    assert.equal(meta.calls.length, 1, 'a rejected token must not be retried');
+  });
+
+  it('retries a transient failure and succeeds once Meta recovers', async () => {
+    meta.statusResponses = [
+      { status: 500, body: { error: { message: 'Internal error' } } },
+      { status: 200, body: { id: 'acct_1', username: 'realuser' } },
+    ];
+
     const info = await getAccountInfo(
-      { accountId: 'acct_1', accessToken: 'bad', apiBase: meta.url },
+      { accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url },
       silentLogger
     );
 
-    assert.equal(info, null);
+    assert.deepEqual(info, { id: 'acct_1', username: 'realuser' });
+    assert.equal(meta.calls.length, 2);
+  });
+
+  // A boot-time network blip must not read the same as a bad token.
+  it('reports Meta as unreachable, not credentials as rejected, once retries are exhausted', async () => {
+    meta.statusResponses = [
+      { status: 503, body: { error: { message: 'try later' } } },
+      { status: 503, body: { error: { message: 'try later' } } },
+      { status: 503, body: { error: { message: 'try later' } } },
+    ];
+
+    await assert.rejects(
+      () =>
+        getAccountInfo(
+          { accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url },
+          silentLogger
+        ),
+      (error: Error) => {
+        assert.ok(!(error instanceof PermanentError));
+        assert.match(error.message, /could not be reached/i);
+        return true;
+      }
+    );
   });
 });

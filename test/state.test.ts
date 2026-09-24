@@ -16,6 +16,8 @@ describe('StateStore', () => {
     store.markProcessing(id, 'telegram', user, 'instagram');
   const posted = (id: string) => store.markPosted(id, 'telegram', 'instagram');
   const failed = (id: string, why = 'boom') => store.markFailed(id, 'telegram', 'instagram', why);
+  const interrupted = (id: string, why = 'interrupted') =>
+    store.markInterrupted(id, 'telegram', 'instagram', why);
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'state-store-'));
@@ -284,6 +286,52 @@ describe('StateStore', () => {
       posted('peer:2');
 
       assert.equal(store.recoverStalled(), 2);
+    });
+  });
+
+  describe('markInterrupted', () => {
+    const attemptsFor = (id: string): number => {
+      const db = new DatabaseSync(join(dir, 'state.db'));
+      const row = db.prepare('SELECT attempts FROM stories WHERE story_id = ?').get(id) as
+        { attempts?: number } | undefined;
+      db.close();
+      return row?.attempts ?? 0;
+    };
+
+    // A publish cut short by stop() never reached Meta, so it must cost nothing — unlike a
+    // real failure, which the 'retry cap' tests above show does spend an attempt.
+    it('puts a never-failed story back to ready without spending an attempt', () => {
+      start('peer:1');
+      interrupted('peer:1');
+
+      assert.equal(attemptsFor('peer:1'), 0, 'must not count as an attempt');
+      assert.equal(
+        store.attemptState('peer:1', 'telegram', 'instagram'),
+        'ready',
+        'an interrupted first try is no different from never having tried'
+      );
+    });
+
+    it('preserves the backoff of an earlier real failure instead of resetting it', () => {
+      start('peer:1');
+      failed('peer:1');
+      start('peer:1');
+      failed('peer:1');
+      assert.equal(
+        store.attemptState('peer:1', 'telegram', 'instagram'),
+        'waiting',
+        'sanity check: two real failures buy a five minute wait'
+      );
+
+      start('peer:1');
+      interrupted('peer:1', 'cut short by shutdown');
+
+      assert.equal(attemptsFor('peer:1'), 2, 'must not add an attempt on top of the real ones');
+      assert.equal(
+        store.attemptState('peer:1', 'telegram', 'instagram'),
+        'waiting',
+        'the earlier failures still back off; being interrupted does not reset the clock'
+      );
     });
   });
 

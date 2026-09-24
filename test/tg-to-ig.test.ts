@@ -5,9 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTgToIgBridge, MAX_RECONNECT_FAILURES } from '../src/bridge/tg-to-ig.js';
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
+import { QuotaExceededError } from '../src/instagram/quota.js';
 import type { StorySource, StoryMedia } from '../src/telegram/types.js';
-import type { MediaServer } from '../src/http/media-server.js';
+import { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
+import { MetaStub } from './helpers/meta-stub.js';
+
+// Below the ephemeral range, distinct from graph-api.test.ts's port. See MetaStub.start.
+const MEDIA_PORT = 25812;
 
 /**
  * The reader downloads everything it yields, so what the bridge asks it for is the whole
@@ -233,6 +238,37 @@ describe('createTgToIgBridge', () => {
     });
   });
 
+  describe('quota', () => {
+    // Regression: ensureCapacity was only checked inside the for-await, i.e. after the reader
+    // had already downloaded the next story — so an exhausted quota still cost a download,
+    // every single cycle, only to throw the result away.
+    it('does not pull a story from the source when the quota is already exhausted', async () => {
+      const { reader, asked } = stubReader(['peer:1']);
+
+      const bridge = createTgToIgBridge(
+        reader,
+        neverPublishes,
+        store,
+        {
+          pollIntervalMs: 60_000,
+          monitoredPeers: ['@someone'],
+          alertAfterFailures: 0,
+          instagram: () => ({ accountId: '', accessToken: '' }),
+          quota: {
+            ensureCapacity: () => Promise.reject(QuotaExceededError.reached(100, 100, 0)),
+            recordPublish: () => {},
+          } as never,
+          onFatal: () => {},
+        },
+        silentLogger
+      );
+
+      await pollOnce(bridge);
+
+      assert.deepEqual(asked, [], 'the reader must never be asked while the quota is exhausted');
+    });
+  });
+
   describe('story ordering', () => {
     // publishStory is not injectable, so completion is read from the attempts column.
     // attemptState() cannot tell: the first backoff is 0, so it reads 'ready' before and after.
@@ -292,6 +328,68 @@ describe('createTgToIgBridge', () => {
         0,
         'a story offered after running went false must not be attempted'
       );
+    });
+
+    // Unlike the reader's own delay above, a publish stuck waiting on its Instagram container
+    // is abortable: stop() must cut it short rather than wait out the full multi-minute timeout.
+    it('cuts a slow publish short instead of waiting it out, at no cost to the story', async () => {
+      const meta = new MetaStub();
+      await meta.start();
+      const mediaServer = new MediaServer(
+        {
+          port: MEDIA_PORT,
+          host: '127.0.0.1',
+          publicBaseUrl: `http://127.0.0.1:${MEDIA_PORT}`,
+          ttlMs: 60_000,
+        },
+        silentLogger
+      );
+      await mediaServer.start();
+      // Never finishes on its own, so nothing but the abort can end this publish.
+      meta.statusSequence = ['IN_PROGRESS'];
+
+      try {
+        const { reader, alerts } = stubReader(['peer:1']);
+        const bridge = createTgToIgBridge(
+          reader,
+          mediaServer,
+          store,
+          {
+            pollIntervalMs: 60_000,
+            monitoredPeers: ['@someone'],
+            alertAfterFailures: 1,
+            instagram: () => ({ accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url }),
+            quota: {
+              ensureCapacity: async () => {},
+              recordPublish: () => {},
+            } as never,
+            onFatal: () => {},
+          },
+          silentLogger
+        );
+
+        bridge.start();
+        // Long enough for the container to be created and the first poll wait to begin, well
+        // short of that wait's own multi-second delay.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const before = Date.now();
+        await bridge.stop();
+
+        assert.ok(
+          Date.now() - before < 1_000,
+          'stop() must not wait out the publish timeout for an abortable wait'
+        );
+        assert.equal(
+          await attemptsFor('peer:1'),
+          0,
+          'an interrupted attempt must not be counted as a failure'
+        );
+        assert.equal(alerts.length, 0, 'must not alert over a publish that was never attempted');
+      } finally {
+        await mediaServer.stop();
+        await meta.stop();
+      }
     });
   });
 

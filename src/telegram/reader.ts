@@ -51,19 +51,32 @@ export class TelegramStoryReader implements StorySource {
     private readonly logger: Logger
   ) {}
 
+  /** Shared by connect() and login(): a fresh, unconnected client seeded with this session. */
+  private newClient(): TelegramClient {
+    return new TelegramClient(
+      new StringSession(this.config.sessionString),
+      this.config.apiId,
+      this.config.apiHash,
+      { connectionRetries: 5 }
+    );
+  }
+
+  /** Logs which account this.client just authenticated as, once it is connected. */
+  private async logConnected(): Promise<void> {
+    if (!this.client) return;
+    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
+    this.logger.info('GramJS connected', {
+      as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
+    });
+  }
+
   /**
    * Connects with an existing session; never calls client.start(), which on a
    * revoked session sends a login code to the account's other devices and
    * loops in signInUser (telegram/client/auth.js) until onError returns true.
    */
   async connect(): Promise<string> {
-    this.client = new TelegramClient(
-      new StringSession(this.config.sessionString),
-      this.config.apiId,
-      this.config.apiHash,
-      { connectionRetries: 5 }
-    );
-
+    this.client = this.newClient();
     await this.client.connect();
 
     if (!(await this.client.isUserAuthorized())) {
@@ -76,23 +89,13 @@ export class TelegramStoryReader implements StorySource {
     }
 
     const sessionString = this.client.session.save() as unknown as string;
-
-    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
-    this.logger.info('GramJS connected', {
-      as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
-    });
-
+    await this.logConnected();
     return sessionString;
   }
 
   /** First-run interactive authentication. See scripts/telegram-login.ts. */
   async login(): Promise<string> {
-    this.client = new TelegramClient(
-      new StringSession(this.config.sessionString),
-      this.config.apiId,
-      this.config.apiHash,
-      { connectionRetries: 5 }
-    );
+    this.client = this.newClient();
 
     await this.client.start({
       phoneNumber: this.config.phoneNumber,
@@ -108,12 +111,7 @@ export class TelegramStoryReader implements StorySource {
     });
 
     const sessionString = this.client.session.save() as unknown as string;
-
-    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
-    this.logger.info('GramJS connected', {
-      as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
-    });
-
+    await this.logConnected();
     return sessionString;
   }
 

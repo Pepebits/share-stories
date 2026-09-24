@@ -15,8 +15,11 @@ services:
     # Reaps zombies and forwards signals, so `docker stop` shuts down cleanly
     # instead of waiting out the timeout.
     init: true
-    # Publishing a video can outlast the default 10s, and stop() waits for
-    # the in-flight cycle to finish before the process exits.
+    # stop() cuts a publish short while it is only waiting on the container, so shutdown is
+    # normally fast — but once media_publish has been sent it is let run to completion rather
+    # than risk a duplicate story, which can still take a while on a slow upload. 90s covers
+    # that without relying on it: SIGKILL after the grace period just leaves the story
+    # 'processing', to be recovered and retried on the next boot.
     stop_grace_period: 90s
     env_file: .env
     environment:

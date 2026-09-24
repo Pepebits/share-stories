@@ -21,11 +21,45 @@ function optionalEnv(key: string, fallback: string = ''): string {
   return process.env[key] ?? fallback;
 }
 
-function parseIntEnv(key: string, fallback: number): number {
-  const value = process.env[key];
-  if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  return isNaN(parsed) ? fallback : parsed;
+/**
+ * parseInt happily turns "12abc" into 12 and accepts any negative number, so a typo in .env
+ * silently became a different, still-plausible setting instead of a startup error. The whole
+ * string must be a plain integer, and it must clear the setting's own floor (a poll interval or
+ * TTL of 0 would spin a timer forever; a negative reserve or port makes no sense at all).
+ */
+export function parseIntEnv(
+  key: string,
+  fallback: number,
+  min: number,
+  max = Number.MAX_SAFE_INTEGER
+): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === '') return fallback;
+
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new Error(`${key} must be a whole number, got: ${raw}`);
+  }
+
+  const parsed = Number(trimmed);
+  if (parsed < min || parsed > max) {
+    const bound = max === Number.MAX_SAFE_INTEGER ? `>= ${min}` : `between ${min} and ${max}`;
+    throw new Error(`${key} must be ${bound}, got: ${raw}`);
+  }
+
+  return parsed;
+}
+
+const LOG_LEVELS = ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'] as const;
+
+/** Winston silently accepts any string and simply never logs at an unknown level. */
+export function validateLogLevel(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') return 'info';
+  const level = raw.trim();
+  if (!(LOG_LEVELS as readonly string[]).includes(level)) {
+    throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got: ${raw}`);
+  }
+  return level;
 }
 
 function parseListEnv(key: string): string[] {
@@ -80,7 +114,6 @@ export interface AppConfig {
   databasePath: string;
   instagramTokenFile: string;
   logLevel: string;
-  projectRoot: string;
 }
 
 // Loopback, RFC 1918, link-local (169.254/16), carrier-grade NAT (100.64/10), and their IPv6
@@ -142,7 +175,6 @@ export function loadConfig(): AppConfig {
   const session = resolveSession(sessionFile, process.env.TELEGRAM_SESSION_STRING);
 
   return {
-    projectRoot,
     telegram: {
       apiId: requireApiId(),
       apiHash: requireEnv('TELEGRAM_API_HASH'),
@@ -156,20 +188,25 @@ export function loadConfig(): AppConfig {
     instagram: {
       accountId: requireEnv('INSTAGRAM_ACCOUNT_ID'),
       accessToken: requireEnv('INSTAGRAM_ACCESS_TOKEN'),
-      quotaReserve: parseIntEnv('INSTAGRAM_QUOTA_RESERVE', 0),
-      quotaRefreshSeconds: parseIntEnv('INSTAGRAM_QUOTA_REFRESH_SECONDS', 600),
+      quotaReserve: parseIntEnv('INSTAGRAM_QUOTA_RESERVE', 0, 0),
+      quotaRefreshSeconds: parseIntEnv('INSTAGRAM_QUOTA_REFRESH_SECONDS', 600, 1),
     },
     mediaServer: {
-      port: parseIntEnv('MEDIA_SERVER_PORT', 8080),
+      port: parseIntEnv('MEDIA_SERVER_PORT', 8080, 1, 65_535),
       // Loopback by default: expose it through a TLS-terminating proxy.
       host: optionalEnv('MEDIA_SERVER_HOST', '127.0.0.1'),
       publicBaseUrl,
-      ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600),
+      ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600, 1),
     },
-    pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120),
-    alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3),
-    databasePath: optionalEnv('DATABASE_PATH', './data/state.db'),
-    instagramTokenFile: optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json'),
-    logLevel: optionalEnv('LOG_LEVEL', 'info'),
+    pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120, 1),
+    alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3, 0),
+    // Resolved here, like sessionFile above, so every path in AppConfig is absolute and
+    // independent of whatever directory the process happens to be started from.
+    databasePath: resolve(projectRoot, optionalEnv('DATABASE_PATH', './data/state.db')),
+    instagramTokenFile: resolve(
+      projectRoot,
+      optionalEnv('INSTAGRAM_TOKEN_FILE', './data/instagram-token.json')
+    ),
+    logLevel: validateLogLevel(process.env.LOG_LEVEL),
   };
 }

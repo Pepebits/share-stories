@@ -62,6 +62,9 @@ export class MetaStub {
   downloadedBytes: Buffer | null = null;
   downloadStatus: number | null = null;
 
+  /** Holds the media_publish reply back, so a test can abort while it is provably in flight. */
+  publishDelayMs = 0;
+
   private server: Server | null = null;
   private port = 0;
   private pollCount = 0;
@@ -134,6 +137,9 @@ export class MetaStub {
     };
 
     if (req.method === 'POST' && path.endsWith('/media_publish')) {
+      if (this.publishDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.publishDelayMs));
+      }
       reply(this.publishResponses.shift() ?? { status: 200, body: { id: 'published_media_1' } });
       return;
     }
