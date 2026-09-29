@@ -26,11 +26,12 @@ allowBuilds:
   es5-ext: false
 
 # Transitive advisories Dependabot could not resolve on its own: the fixed
-# versions exist but sit behind eslint's dependency tree. Pinned with caret
+# versions exist but sit behind eslint's dependency tree, or telegram's for
+# ip-address (via socks). Pinned with caret
 # ranges inside each existing major — a bare >= pulled js-yaml across to 5.x,
 # a major bump for a dependency nobody asked to upgrade.
 overrides:
-  'ip-address@<10.2.1': '>=10.2.1'
+  'ip-address@<10.5.1': '^10.5.1'
   'js-yaml@^4.0.0': '^4.3.1'
   'brace-expansion@^1.0.0': '^1.1.18'
   'brace-expansion@^5.0.0': '^5.0.9'
