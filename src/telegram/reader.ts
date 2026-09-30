@@ -113,6 +113,15 @@ export class TelegramStoryReader implements StorySource {
       // without a terminal, prompt() refuses rather than blocking on stdin forever.
       phoneCode: () => prompt('Telegram login code: '),
       password: () => prompt('Telegram 2FA password: ', true),
+      // teleproto-only: when the account has no login email, Telegram may require setting one
+      // up before it sends the phone code (GramJS just failed here). Without these callbacks
+      // start() throws instead of asking. Only the typed-code path is offered; the Google and
+      // Apple sign-in tokens the API allows cannot be produced at a terminal.
+      emailAddress: () => prompt('Telegram login email (Telegram requires one): '),
+      emailVerification: async (options) => ({
+        type: 'code',
+        code: await prompt(`Code sent to ${options.emailPattern ?? 'your email'}: `),
+      }),
       onError: (error: Error): Promise<boolean> => {
         this.logger.error('GramJS connection error', { error: error.message });
         // At a terminal GramJS asks again; without one, returning true stops it instead of looping.
