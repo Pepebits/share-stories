@@ -18,9 +18,12 @@ import {
 import { rejectionReason } from '../instagram/limits.js';
 import { storyScope, isAllowed, type StoryScope } from './scope.js';
 import { prompt, isInteractive } from '../utils/prompt.js';
+import { TelegramSessionError, sessionLostError } from './session-error.js';
+import { asSessionError } from './auth-errors.js';
 
-/** Thrown when the configured session is missing or Telegram has revoked it. */
-export class TelegramSessionError extends Error {}
+// Re-exported so callers keep importing it from here; it lives apart so the bridge can test
+// for it without loading the Telegram client.
+export { TelegramSessionError };
 
 /**
  * Reads active Telegram stories over MTProto with a user-account session — an unscoped
@@ -77,20 +80,26 @@ export class TelegramStoryReader implements StorySource {
    */
   async connect(): Promise<string> {
     this.client = this.newClient();
-    await this.client.connect();
 
-    if (!(await this.client.isUserAuthorized())) {
-      await this.client.disconnect();
+    try {
+      await this.client.connect();
+
+      if (!(await this.client.isUserAuthorized())) throw sessionLostError();
+
+      const sessionString = this.client.session.save() as unknown as string;
+      await this.logConnected();
+      return sessionString;
+    } catch (error) {
+      // isUserAuthorized() is the usual detector, but a revoked key can also surface as a typed
+      // RPC error from connect() or getMe(); both end the same way, with the login hint.
+      const lost = asSessionError(error);
+      if (!lost) throw error;
+
+      const client = this.client;
       this.client = null;
-      throw new TelegramSessionError(
-        'Telegram session is missing or revoked. Run `pnpm run login`; it writes the session ' +
-          'file at TELEGRAM_SESSION_FILE.'
-      );
+      await client.disconnect().catch(() => {});
+      throw lost;
     }
-
-    const sessionString = this.client.session.save() as unknown as string;
-    await this.logConnected();
-    return sessionString;
   }
 
   /** First-run interactive authentication. See scripts/telegram-login.ts. */
@@ -119,7 +128,12 @@ export class TelegramStoryReader implements StorySource {
     if (!this.client) {
       throw new Error('Reader not connected. Call connect() first.');
     }
-    await this.client.connect();
+    try {
+      await this.client.connect();
+    } catch (error) {
+      // A revoked session is not a network problem; the bridge must not retry it as one.
+      throw asSessionError(error) ?? error;
+    }
   }
 
   /**
@@ -140,7 +154,7 @@ export class TelegramStoryReader implements StorySource {
       response = (await this.client.invoke(new Api.stories.GetAllStories({}))) as never;
     } catch (error) {
       this.logger.error('Failed to fetch Telegram stories', { error: errorMessage(error) });
-      throw error;
+      throw asSessionError(error) ?? error;
     }
 
     const feed = response.peerStories ?? [];

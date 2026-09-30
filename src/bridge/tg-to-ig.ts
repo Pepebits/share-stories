@@ -6,6 +6,7 @@ import { errorMessage } from '../utils/errors.js';
 import { InstagramPublishConfig } from '../instagram/types.js';
 import { QuotaGuard, QuotaExceededError } from '../instagram/quota.js';
 import { MediaServer } from '../http/media-server.js';
+import { TelegramSessionError } from '../telegram/session-error.js';
 
 /** Consecutive reconnect failures before the bridge gives up and exits. */
 export const MAX_RECONNECT_FAILURES = 5;
@@ -24,7 +25,10 @@ export interface TgToIgConfig {
    * counted across cycles so a self-resolving blip does not trigger it.
    */
   alertAfterFailures: number;
-  /** Called once reconnecting has failed MAX_RECONNECT_FAILURES times in a row. */
+  /**
+   * Called once reconnecting has failed MAX_RECONNECT_FAILURES times in a row, or at once when
+   * Telegram reports the session lost (retrying cannot fix that).
+   */
   onFatal: (reason: string) => void;
 }
 
@@ -155,6 +159,12 @@ export function createTgToIgBridge(
           reconnectFailures = 0;
           logger.info('Telegram reconnected');
         } catch (error) {
+          // Retrying a revoked session just burns the failure budget while it looks like a
+          // network problem; only `pnpm run login` fixes it.
+          if (error instanceof TelegramSessionError) {
+            config.onFatal(error.message);
+            return;
+          }
           reconnectFailures++;
           logger.warn('Telegram reconnect failed', {
             attempt: reconnectFailures,
@@ -187,6 +197,8 @@ export function createTgToIgBridge(
       }
     } catch (error) {
       logger.error('TG→IG poll cycle error', { error: errorMessage(error) });
+      // The session can also be revoked while connected; every later cycle would fail the same way.
+      if (error instanceof TelegramSessionError) config.onFatal(error.message);
     } finally {
       polling = false;
     }
