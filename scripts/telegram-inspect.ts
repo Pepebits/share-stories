@@ -6,8 +6,8 @@
  *   pnpm run inspect
  */
 import { TelegramClient, Api } from 'teleproto';
-import { StringSession } from 'teleproto/sessions/index.js';
-import { LogLevel } from 'teleproto/extensions/Logger.js';
+import { StringSession } from 'teleproto/sessions';
+import { LogLevel } from 'teleproto/extensions/Logger';
 import { resolve } from 'node:path';
 import { loadDotEnv } from '../src/utils/env.js';
 import { namesOf, peerLabel, type RawPeer } from '../src/telegram/feed.js';

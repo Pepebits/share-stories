@@ -6,7 +6,7 @@ import {
   SessionRevokedError,
   UserDeactivatedBanError,
   UserDeactivatedError,
-} from 'teleproto/errors/index.js';
+} from 'teleproto/errors';
 import { TelegramSessionError, sessionLostError } from './session-error.js';
 
 /**

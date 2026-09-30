@@ -6,6 +6,12 @@
 # a compromised version published and pulled within hours.
 minimumReleaseAge: 10080
 
+# Exempt from the age check by name and version, not wholesale: 1.229.1 adds the
+# `exports` map requested in sanyok12345/teleproto#43 and was taken on the day it
+# shipped. Remove this once it is a week old (2026-10-07).
+minimumReleaseAgeExclude:
+  - teleproto@1.229.1
+
 # Strict node_modules: a transitive dependency cannot be imported unless it is
 # declared in package.json.
 hoist: false

@@ -1,5 +1,5 @@
 import { TelegramClient, Api } from 'teleproto';
-import { StringSession } from 'teleproto/sessions/index.js';
+import { StringSession } from 'teleproto/sessions';
 import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
 import { errorMessage } from '../utils/errors.js';

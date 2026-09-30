@@ -8,7 +8,7 @@ import {
   UserDeactivatedBanError,
   UserDeactivatedError,
   FloodError,
-} from 'teleproto/errors/index.js';
+} from 'teleproto/errors';
 import { Api } from 'teleproto';
 import { asSessionError } from '../src/telegram/auth-errors.js';
 import { TelegramSessionError, sessionLostError } from '../src/telegram/session-error.js';
