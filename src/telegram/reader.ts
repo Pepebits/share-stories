@@ -10,7 +10,6 @@ import {
   matchesPeer,
   describeTelegramMedia,
   isVideoBuffer,
-  type PeerId,
   type RawPeer,
   type RawStory,
   type PeerNames,
@@ -40,14 +39,18 @@ export interface TelegramReaderConfig {
   allowedScopes: StoryScope[];
 }
 
-/** One entry per peer, each holding that peer's active stories. */
-interface PeerStories {
-  peer?: { userId?: PeerId; channelId?: PeerId; chatId?: PeerId };
-  stories?: RawStory[];
+/** A peer is a user, a channel or a basic group; exactly one of these ids is set. */
+function peerIdOf(peer: Api.TypePeer): string {
+  if ('userId' in peer) return peer.userId.toString();
+  if ('channelId' in peer) return peer.channelId.toString();
+  return peer.chatId.toString();
 }
 
 export class TelegramStoryReader implements StorySource {
   private client: TelegramClient | null = null;
+  // Kept beside the client because client.session is typed as the abstract Session, whose
+  // save() may return void; StringSession.save() is known to return the string.
+  private session: StringSession | null = null;
 
   constructor(
     private readonly config: TelegramReaderConfig,
@@ -56,18 +59,16 @@ export class TelegramStoryReader implements StorySource {
 
   /** Shared by connect() and login(): a fresh, unconnected client seeded with this session. */
   private newClient(): TelegramClient {
-    return new TelegramClient(
-      new StringSession(this.config.sessionString),
-      this.config.apiId,
-      this.config.apiHash,
-      { connectionRetries: 5 }
-    );
+    this.session = new StringSession(this.config.sessionString);
+    return new TelegramClient(this.session, this.config.apiId, this.config.apiHash, {
+      connectionRetries: 5,
+    });
   }
 
   /** Logs which account this.client just authenticated as, once it is connected. */
   private async logConnected(): Promise<void> {
     if (!this.client) return;
-    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
+    const me: RawPeer | undefined = await this.client.getMe();
     this.logger.info('GramJS connected', {
       as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
     });
@@ -86,7 +87,7 @@ export class TelegramStoryReader implements StorySource {
 
       if (!(await this.client.isUserAuthorized())) throw sessionLostError();
 
-      const sessionString = this.client.session.save() as unknown as string;
+      const sessionString = this.session?.save() ?? '';
       await this.logConnected();
       return sessionString;
     } catch (error) {
@@ -119,7 +120,7 @@ export class TelegramStoryReader implements StorySource {
       },
     });
 
-    const sessionString = this.client.session.save() as unknown as string;
+    const sessionString = this.session?.save() ?? '';
     await this.logConnected();
     return sessionString;
   }
@@ -149,30 +150,34 @@ export class TelegramStoryReader implements StorySource {
       throw new Error('Reader not connected. Call connect() first.');
     }
 
-    let response: { peerStories?: PeerStories[]; users?: RawPeer[]; chats?: RawPeer[] };
+    let response: Api.stories.TypeAllStories;
     try {
-      response = (await this.client.invoke(new Api.stories.GetAllStories({}))) as never;
+      response = await this.client.invoke(new Api.stories.GetAllStories({}));
     } catch (error) {
       this.logger.error('Failed to fetch Telegram stories', { error: errorMessage(error) });
       throw asSessionError(error) ?? error;
     }
 
-    const feed = response.peerStories ?? [];
+    // AllStoriesNotModified carries no feed at all; with no state token sent it should not
+    // occur, but it is in the typings, so it reads as "nothing new".
+    if (!('peerStories' in response)) return;
+
+    const feed = response.peerStories;
     if (feed.length === 0) return;
 
     this.logger.debug('Fetched stories from Telegram', {
       peers: feed.length,
-      stories: feed.reduce((total, entry) => total + (entry.stories?.length ?? 0), 0),
+      stories: feed.reduce((total, entry) => total + entry.stories.length, 0),
     });
 
     const names = new Map<string, PeerNames>();
-    for (const peer of [...(response.users ?? []), ...(response.chats ?? [])]) {
+    const known: RawPeer[] = [...response.users, ...response.chats];
+    for (const peer of known) {
       names.set(peer.id.toString(), namesOf(peer));
     }
 
     for (const entry of feed) {
-      const peerId =
-        (entry.peer?.userId ?? entry.peer?.channelId ?? entry.peer?.chatId)?.toString() ?? '';
+      const peerId = peerIdOf(entry.peer);
       const info = names.get(peerId);
       const label = peerLabel(peerId, info);
 
@@ -183,7 +188,7 @@ export class TelegramStoryReader implements StorySource {
 
       // Asked before resolveSkipped, so an already-published story costs neither a fetch nor
       // a download.
-      const pending = (entry.stories ?? []).filter(
+      const pending: RawStory[] = entry.stories.filter(
         (story) => story.id !== undefined && isWanted(`${peerId}:${story.id}`)
       );
 
@@ -213,7 +218,7 @@ export class TelegramStoryReader implements StorySource {
    * every skipped story would reach Instagram as a zero-byte file.
    */
   private async resolveSkipped(
-    peer: PeerStories['peer'],
+    peer: Api.TypePeer | undefined,
     stories: RawStory[],
     peerLabel: string
   ): Promise<RawStory[]> {
@@ -227,14 +232,17 @@ export class TelegramStoryReader implements StorySource {
     if (skipped.length === 0) return stories;
 
     try {
-      const full = (await client.invoke(
+      if (!peer) return stories;
+      const full = await client.invoke(
         new Api.stories.GetStoriesByID({
-          peer: await client.getInputEntity(peer as never),
+          peer: await client.getInputEntity(peer),
           id: skipped.map((story) => story.id as number),
         })
-      )) as unknown as { stories?: RawStory[] };
+      );
 
-      const resolved = new Map((full.stories ?? []).map((story) => [story.id, story]));
+      const resolved = new Map<number | undefined, RawStory>(
+        full.stories.map((story) => [story.id, story])
+      );
 
       this.logger.debug('Resolved skipped stories', {
         peer: peerLabel,
@@ -335,6 +343,8 @@ export class TelegramStoryReader implements StorySource {
     const notEmpty = (buffer: Buffer): Buffer | null => (buffer.length > 0 ? buffer : null);
 
     const attempt = async (target: unknown): Promise<Buffer | null> => {
+      // Kept: downloadMedia is typed for a Message or message media, but a story (and its
+      // `media`, held as unknown in RawStory) is deliberately passed too — see the fallback below.
       const downloaded = await client.downloadMedia(target as never, {});
       if (Buffer.isBuffer(downloaded)) return notEmpty(downloaded);
       if (typeof downloaded === 'string') return notEmpty(await readFile(downloaded));
