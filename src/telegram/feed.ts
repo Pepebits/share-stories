@@ -1,11 +1,11 @@
 import type { MediaFacts } from '../instagram/limits.js';
 
 /**
- * The GramJS-facing shapes a story feed is built from, and the pure functions
+ * The teleproto-facing shapes a story feed is built from, and the pure functions
  * that read them — no client, no I/O, so this is testable without Telegram.
  */
 
-/** GramJS returns ids as BigInteger instances, not numbers. */
+/** teleproto (like GramJS before it) returns ids as BigInteger instances, not numbers. */
 export type PeerId = { toString(): string };
 
 /** Telegram allows several usernames; the legacy field is null when it does. */
@@ -36,7 +36,7 @@ export interface RawStory {
   className?: string;
 }
 
-/** The shape of the two media types a story can carry, as GramJS returns them. */
+/** The shape of the two media types a story can carry, as teleproto returns them. */
 export interface RawMedia {
   document?: {
     size?: { toString(): string } | number;

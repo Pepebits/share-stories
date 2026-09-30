@@ -19,11 +19,11 @@ updates:
       minor-and-patch:
         patterns: ['*']
         update-types: ['minor', 'patch']
-    # GramJS leaves the story surface untyped, so feed.ts rests on shapes read
-    # from live responses. A major gets checked against the live API by hand,
+    # Telegram's story surface is only lightly exercised by tests, so feed.ts rests on
+    # shapes read from live responses. A major gets checked against the live API by hand,
     # not merged on a green build that never talks to Telegram.
     ignore:
-      - dependency-name: telegram
+      - dependency-name: teleproto
         update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions

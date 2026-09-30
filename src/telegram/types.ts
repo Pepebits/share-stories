@@ -12,7 +12,7 @@ export interface StoryMedia {
   timestamp: number;
 }
 
-/** What the bridge needs from a story source, independent of GramJS. */
+/** What the bridge needs from a story source, independent of the Telegram client library. */
 export interface StorySource {
   /** Yields each story as soon as it is downloaded, so the bridge can publish while more arrive. */
   stories(peers: string[], isWanted: (storyId: string) => boolean): AsyncIterable<StoryMedia>;

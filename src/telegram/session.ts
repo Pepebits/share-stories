@@ -28,7 +28,7 @@ export function resolveSession(
 }
 
 // Written via a temp file + rename so a crash mid-write can never leave a
-// truncated session on disk — GramJS would treat that as a corrupt session
+// truncated session on disk — teleproto would treat that as a corrupt session
 // rather than a missing one.
 export function writeSession(path: string, session: string): void {
   mkdirSync(dirname(path), { recursive: true });

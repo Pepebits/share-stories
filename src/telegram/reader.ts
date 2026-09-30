@@ -26,8 +26,9 @@ export { TelegramSessionError };
 
 /**
  * Reads active Telegram stories over MTProto with a user-account session — an unscoped
- * credential for the whole account, but the Bot API cannot see stories at all. GramJS leaves
- * this surface untyped, so the shapes in feed.ts were taken from live responses.
+ * credential for the whole account, but the Bot API cannot see stories at all. teleproto (the maintained fork of
+ * GramJS; sessions made with either load in both) types most of this surface, but the shapes in
+ * feed.ts were taken from live responses and stay the contract.
  */
 
 export interface TelegramReaderConfig {
@@ -69,7 +70,7 @@ export class TelegramStoryReader implements StorySource {
   private async logConnected(): Promise<void> {
     if (!this.client) return;
     const me: RawPeer | undefined = await this.client.getMe();
-    this.logger.info('GramJS connected', {
+    this.logger.info('Telegram connected', {
       as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
     });
   }
@@ -77,7 +78,7 @@ export class TelegramStoryReader implements StorySource {
   /**
    * Connects with an existing session; never calls client.start(), which on a
    * revoked session sends a login code to the account's other devices and
-   * loops in signInUser (telegram/client/auth.js) until onError returns true.
+   * loops in signInUser (teleproto/client/auth.js) until onError returns true.
    */
   async connect(): Promise<string> {
     this.client = this.newClient();
@@ -123,8 +124,8 @@ export class TelegramStoryReader implements StorySource {
         code: await prompt(`Code sent to ${options.emailPattern ?? 'your email'}: `),
       }),
       onError: (error: Error): Promise<boolean> => {
-        this.logger.error('GramJS connection error', { error: error.message });
-        // At a terminal GramJS asks again; without one, returning true stops it instead of looping.
+        this.logger.error('Telegram connection error', { error: error.message });
+        // At a terminal teleproto asks again; without one, returning true stops it instead of looping.
         return Promise.resolve(!isInteractive());
       },
     });
@@ -394,7 +395,7 @@ export class TelegramStoryReader implements StorySource {
     if (!this.client) return;
     await this.client.disconnect();
     this.client = null;
-    this.logger.info('GramJS disconnected');
+    this.logger.info('Telegram disconnected');
   }
 
   isConnected(): boolean {

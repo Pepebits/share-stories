@@ -26,7 +26,7 @@ allowBuilds:
   es5-ext: false
 
 # Transitive advisories Dependabot could not resolve on its own: the fixed
-# versions exist but sit behind eslint's dependency tree, or telegram's for
+# versions exist but sit behind eslint's dependency tree, or teleproto's for
 # ip-address (via socks). Pinned with caret
 # ranges inside each existing major — a bare >= pulled js-yaml across to 5.x,
 # a major bump for a dependency nobody asked to upgrade.

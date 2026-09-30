@@ -8,7 +8,7 @@ official Content Publishing API.
 │  Telegram Story  │                      │  Instagram Story │
 │    (source)      │─────── bridge ──────▶│    (target)      │
 │                  │                      │                  │
-│  read via GramJS │  ┌────────────────┐  │  published via   │
+│  via teleproto   │  ┌────────────────┐  │  published via   │
 │  MTProto         │  │  media server  │  │  Content         │
 │                  │  │  (public URL)  │  │  Publishing API  │
 └──────────────────┘  └────────────────┘  └──────────────────┘
@@ -125,13 +125,13 @@ removed implementation.
 ## Tech stack
 
 - **Runtime** Node.js 24.19+ (ESM) · **Language** TypeScript 6 · **Packages** pnpm 11
-- **Telegram** GramJS (MTProto) — the Bot API cannot see stories
+- **Telegram** [teleproto](https://github.com/sanyok12345/teleproto) (MTProto), the maintained fork of GramJS — the Bot API cannot see stories. Sessions created with GramJS keep working.
 - **Instagram** Content Publishing API, `graph.instagram.com` v26.0
 - **State** SQLite via Node's built-in `node:sqlite` — no native module · **Logs** Winston
 
 ## How it works
 
-1. GramJS polls `stories.GetAllStories` for the peers in `TELEGRAM_MONITORED_PEERS`.
+1. teleproto polls `stories.GetAllStories` for the peers in `TELEGRAM_MONITORED_PEERS`.
 2. New stories are downloaded and checked against the SQLite store.
 3. The media is exposed at a temporary public URL.
 4. `POST /<IG_ID>/media` creates a `STORIES` container.
@@ -200,7 +200,7 @@ creation, status polling, `ERROR`/`EXPIRED` containers, a rejected token
 aborting without retries, 5xx and 429 retrying, and the media URL being
 revoked on both success and failure.
 
-**Not covered**: `telegram/reader.ts` (GramJS) beyond what moved into the
+**Not covered**: `telegram/reader.ts` (teleproto) beyond what moved into the
 pure `telegram/feed.ts` module, which is tested, and the startup path in
 `index.ts`. Whether Meta accepts a given video, and whether it can reach
 `PUBLIC_BASE_URL`, can only be learned from a real publish.
