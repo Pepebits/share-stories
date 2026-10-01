@@ -284,6 +284,29 @@ those steps are skipped and nothing changes.
 > disclose the source, so keep that in mind for a fork you do not intend to
 > open up. ghcr.io needs no extra account, which is why it is the default.
 
+### Announcing releases on Telegram
+
+Optional, and off unless you configure it. After the images are pushed, the
+workflow posts the release — version, notes from the tag message, image name
+and links — to a Telegram chat as a
+[rich message](https://core.telegram.org/bots/api#rich-messages). Create a bot
+with [@BotFather](https://t.me/BotFather) (`/newbot`), add it to your channel
+as an administrator allowed to post messages (or to a group as a member), and
+add two repository secrets — **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | The token @BotFather gives you |
+| `TELEGRAM_CHAT_ID` | `@channelname` for a public channel, otherwise the numeric id (`-100…` for channels and supergroups) |
+
+To find a numeric id, post something in the chat and open
+`https://api.telegram.org/bot<token>/getUpdates` in a browser on your own
+machine; the id is under `chat.id`. Without both secrets nothing is sent and
+the release is unaffected; a failed announcement is a warning, never a failed
+release. **Actions → Announce release → Run workflow** previews the message
+for an existing tag, and with `TELEGRAM_TEST_CHAT_ID` set can send it to a test
+chat first.
+
 ### Publishing by hand
 
 ```bash
