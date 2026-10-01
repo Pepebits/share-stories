@@ -80,7 +80,10 @@ def chunk_blocks:
          else [{type: "photo", photo: {type: "photo", media: $banner_url}}] end)
         + [ {type: "heading", size: 1,
              text: ["🚀 share-stories ", {type: "bold", text: $version}]},
-            {type: "paragraph", text: ["✨ ", {type: "italic", text: $subject}]} ]
+            {type: "paragraph", text: ["✨ ", {type: "italic", text: $subject}]},
+            # Blocks carry no spacing of their own; a line holding only a
+            # non-breaking space sets the header apart from the notes.
+            {type: "paragraph", text: "\u00a0"} ]
         + ($chunks | map(chunk_blocks) | add // [])
         + [ {type: "divider"},
             # A code block rather than inline code: Telegram gives it a copy
