@@ -259,40 +259,20 @@ purpose.
 
 ### Also publishing to Docker Hub
 
-Optional, and off unless you configure it. Add two repository secrets —
-**Settings → Secrets and variables → Actions**:
-
-| Secret | Value |
-|---|---|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | A personal access token, **not** your password |
-
-Create the token at **Docker Hub → Account settings → Personal access tokens**
-with *Read & Write*, scoped to this repository if the plan allows it. With
-both secrets present the workflow pushes to Docker Hub as well; without them
-those steps are skipped and nothing changes.
-
-> **Put the token in GitHub, not on your laptop.** Repository secrets are
-> encrypted at rest, masked if something echoes them, and never exposed to
-> pull requests from forks. A token on a developer machine ends up in shell
-> history, in `~/.docker/config.json`, and in whatever backs that machine up.
-> It also means CI does the multi-architecture build, which is far quicker
-> than emulating amd64 on an Apple Silicon laptop.
-
-> **Docker Hub's free plan is public.** Anyone can pull the image. It carries
-> no credentials — `.dockerignore` excludes `.env` and `data/` — but it does
-> disclose the source, so keep that in mind for a fork you do not intend to
-> open up. ghcr.io needs no extra account, which is why it is the default.
-
-### Announcing releases on Telegram
-
 Optional, and off unless you configure it. After the images are pushed, the
 workflow posts the release — version, notes from the tag message, image name
 and links — to a Telegram chat as a
-[rich message](https://core.telegram.org/bots/api#rich-messages). Create a bot
-with [@BotFather](https://t.me/BotFather) (`/newbot`), add it to your channel
-as an administrator allowed to post messages (or to a group as a member), and
-add two repository secrets — **Settings → Secrets and variables → Actions**:
+[rich message](https://core.telegram.org/bots/api#rich-messages). The message
+is built by the shared
+[Pepebits/release-announce](https://github.com/Pepebits/release-announce)
+workflow, which `publish.yml` calls pinned to `@v1`; its README lists every
+input. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), add
+it to your channel as an administrator allowed to post messages (or to a group
+as a member), and add two secrets — either as **organization secrets** shared
+with this repository (**Organization settings → Secrets and variables →
+Actions**), so every Pepebits project announces through the same bot, or as
+repository secrets (**Settings → Secrets and variables → Actions**). A
+repository secret wins over an organization one of the same name.
 
 | Secret | Value |
 |---|---|
