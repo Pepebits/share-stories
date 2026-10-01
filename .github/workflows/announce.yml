@@ -1,0 +1,135 @@
+name: Announce release
+
+# Posts a Telegram rich message announcing a release. publish.yml calls this
+# once the images are pushed; run it by hand (Actions → Announce release → Run
+# workflow) to preview the message, or to send it to a test chat, without
+# publishing anything.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    # Optional: a fork without them skips the announcement instead of failing.
+    secrets:
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to announce, e.g. v1.1.0
+        type: string
+        required: true
+      chat:
+        description: Where to send it
+        type: choice
+        options: [test, announcements]
+        default: test
+      dry_run:
+        description: Only print the message, send nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      # Inputs reach the scripts through the environment, never through ${{ }}
+      # inside `run:` — a crafted tag name would otherwise be shell code.
+      TAG: ${{ inputs.tag }}
+      # Empty when called from publish.yml, which means: the real channel.
+      CHAT: ${{ inputs.chat }}
+      DRY_RUN: ${{ inputs.dry_run || false }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_TEST_CHAT_ID: ${{ secrets.TELEGRAM_TEST_CHAT_ID }}
+
+    steps:
+      - name: Check the tag name
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      # actions/checkout replaces an annotated tag with a lightweight one
+      # pointing at the commit (actions/checkout#290), and a manual run does
+      # not fetch it at all — either way the release notes would be lost.
+      # Fetching the tag object itself keeps its message.
+      - name: Fetch the annotated tag
+        run: git fetch --no-tags --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG"
+
+      - name: Build the message
+        id: build
+        run: |
+          # Chosen here rather than with `cond && a || b` in the env block:
+          # that idiom falls through to the real channel whenever the test
+          # chat secret is empty.
+          if [ "$CHAT" = test ]; then chat_id="$TELEGRAM_TEST_CHAT_ID"; else chat_id="$TELEGRAM_CHAT_ID"; fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$chat_id" ]; then
+            echo "::notice::No bot token or chat id secret for this target; the message is built but not sent"
+          elif [ "$DRY_RUN" != true ]; then
+            echo "send=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$(git cat-file -t "refs/tags/$TAG")" != tag ]; then
+            echo "::warning::$TAG is a lightweight tag; announcing it without notes"
+          fi
+          subject="$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")"
+          # Telegram fetches the banner itself, so it is linked at the tag
+          # rather than at main: a later redesign must not change an old post.
+          banner_url=""
+          if git cat-file -e "refs/tags/$TAG:docs/banner.png" 2>/dev/null; then
+            banner_url="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/docs/banner.png"
+          fi
+          # Rich messages take up to 32768 characters; the tag notes are
+          # nowhere near that, but a runaway message should not lose the
+          # announcement. The full notes are one tap away on GitHub.
+          git for-each-ref --format='%(contents:body)' "refs/tags/$TAG" \
+            | head -c 30000 \
+            | jq -R -s -f .github/release-announcement.jq \
+                --arg chat_id "$chat_id" \
+                --arg tag "$TAG" \
+                --arg version "${TAG#v}" \
+                --arg subject "${subject:-$TAG}" \
+                --arg repo_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+                --arg image "ghcr.io/${GITHUB_REPOSITORY,,}" \
+                --arg banner_url "$banner_url" \
+            > "$RUNNER_TEMP/message.json"
+          # chat_id is a secret, so it shows as *** here.
+          jq . "$RUNNER_TEMP/message.json"
+
+      # The images are already public by the time this runs, so a Telegram
+      # outage or a revoked bot must not turn a good release red — same
+      # reasoning as the Docker Hub overview in publish.yml. A failure still
+      # shows as a warning on the run.
+      - name: Send to Telegram
+        if: steps.build.outputs.send == 'true'
+        continue-on-error: true
+        run: |
+          # The token lives in the URL, so the URL goes to curl on stdin rather
+          # than on its command line: it never appears in `ps`, in a `set -x`
+          # trace or in a curl error message. Secrets are masked in the log
+          # anyway; this keeps it out of everything else.
+          printf 'url = "https://api.telegram.org/bot%s/sendRichMessage"\n' "$TELEGRAM_BOT_TOKEN" \
+            | curl --config - --silent --show-error \
+                --max-time 30 --retry 3 --retry-delay 5 \
+                --header 'Content-Type: application/json' \
+                --data-binary "@$RUNNER_TEMP/message.json" \
+                --output "$RUNNER_TEMP/response.json" \
+            || true
+          if [ "$(jq -r '.ok' "$RUNNER_TEMP/response.json" 2>/dev/null)" != true ]; then
+            reason="$(jq -r '"\(.error_code) \(.description)"' "$RUNNER_TEMP/response.json" 2>/dev/null || echo 'no response')"
+            echo "::warning::Telegram announcement not sent: $reason"
+            exit 1
+          fi
+          echo "Sent as message $(jq -r '.result.message_id' "$RUNNER_TEMP/response.json")"
+
