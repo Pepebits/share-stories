@@ -75,12 +75,14 @@ def chunk_blocks:
             {type: "paragraph", text: ["✨ ", {type: "italic", text: $subject}]} ]
         + ($chunks | map(chunk_blocks) | add // [])
         + [ {type: "divider"},
-            {type: "paragraph",
-             text: ["🐳 ", {type: "code", text: "\($image):\($version)"}]},
+            # A code block rather than inline code: Telegram gives it a copy
+            # button, and the whole pull command is what people paste.
+            {type: "paragraph", text: {type: "bold", text: "🐳 Docker image"}},
+            {type: "pre", language: "bash", text: "docker pull \($image):\($version)"},
             {type: "buttons", align: "center",
              buttons: [
-               {text: "📝 Release notes", url: "\($repo_url)/releases/tag/\($tag)"},
-               {text: "📦 Container image", url: "\($repo_url)/pkgs/container/share-stories"}
+               {text: "📝 Notes", url: "\($repo_url)/releases/tag/\($tag)"},
+               {text: "📦 Package", url: "\($repo_url)/pkgs/container/share-stories"}
              ]},
             {type: "footer", text: "🏷️ Also tagged \($version | split(".")[:2] | join(".")) and latest"} ]
       )
