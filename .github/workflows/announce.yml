@@ -84,6 +84,12 @@ jobs:
             echo "::warning::$TAG is a lightweight tag; announcing it without notes"
           fi
           subject="$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")"
+          # Telegram fetches the banner itself, so it is linked at the tag
+          # rather than at main: a later redesign must not change an old post.
+          banner_url=""
+          if git cat-file -e "refs/tags/$TAG:docs/banner.png" 2>/dev/null; then
+            banner_url="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/docs/banner.png"
+          fi
           # Rich messages take up to 32768 characters; the tag notes are
           # nowhere near that, but a runaway message should not lose the
           # announcement. The full notes are one tap away on GitHub.
@@ -96,6 +102,7 @@ jobs:
                 --arg subject "${subject:-$TAG}" \
                 --arg repo_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
                 --arg image "ghcr.io/${GITHUB_REPOSITORY,,}" \
+                --arg banner_url "$banner_url" \
             > "$RUNNER_TEMP/message.json"
           # chat_id is a secret, so it shows as *** here.
           jq . "$RUNNER_TEMP/message.json"
