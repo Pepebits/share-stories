@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   announce:
-    uses: Pepebits/release-announce/.github/workflows/announce.yml@main
+    uses: Pepebits/release-announce/.github/workflows/announce.yml@v1
     with:
       tag: ${{ inputs.tag }}
       chat: ${{ inputs.chat }}
