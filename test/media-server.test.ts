@@ -204,7 +204,11 @@ describe('MediaServer', () => {
   describe('isolation', () => {
     it('404s an unknown token', async () => {
       const { url, release } = server.host(payload, 'video');
-      const wrong = url.replace(/\/media\/./, '/media/z');
+      // Swaps the first character for a different one: always writing 'z' left the URL
+      // unchanged whenever the random token already started with it, 1 run in 64.
+      const wrong = url.replace(/\/media\/(.)/, (_, first: string) =>
+        first === 'z' ? '/media/y' : '/media/z'
+      );
       assert.equal((await fetch(wrong)).status, 404);
       release();
     });
