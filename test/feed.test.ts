@@ -10,7 +10,7 @@ import {
 } from '../src/telegram/feed.js';
 
 /**
- * Pure Telegram shape-reading, kept apart from GramJS so it is testable
+ * Pure Telegram shape-reading, kept apart from teleproto so it is testable
  * without a client, a session, or the network.
  */
 describe('namesOf', () => {

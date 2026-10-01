@@ -5,7 +5,7 @@ import { isInteractive, NonInteractiveError, prompt, type PromptIO } from '../sr
 
 /**
  * The masked branch once relied on a private readline hook that readline/promises lacks,
- * and GramJS retries a failed 2FA prompt in a loop — so it must work without one.
+ * and teleproto retries a failed 2FA prompt in a loop — so it must work without one.
  */
 
 class FakeInput extends EventEmitter {

@@ -7,6 +7,7 @@ import { createTgToIgBridge, MAX_RECONNECT_FAILURES } from '../src/bridge/tg-to-
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
 import { QuotaExceededError } from '../src/instagram/quota.js';
 import type { StorySource, StoryMedia } from '../src/telegram/types.js';
+import { TelegramSessionError, sessionLostError } from '../src/telegram/session-error.js';
 import { MediaServer } from '../src/http/media-server.js';
 import { silentLogger } from './helpers/logger.js';
 import { MetaStub } from './helpers/meta-stub.js';
@@ -235,6 +236,47 @@ describe('createTgToIgBridge', () => {
 
       await pollOnce(bridge);
       assert.equal(fatal.length, 1, 'called exactly once at the threshold');
+    });
+  });
+
+  describe('revoked session', () => {
+    it('calls onFatal straight away when reconnect reports a lost session', async () => {
+      const { reader, asked } = stubReader(['peer:1'], {
+        isConnected: () => false,
+        reconnect: () => Promise.reject(sessionLostError('SESSION_REVOKED')),
+      });
+      const fatal: string[] = [];
+
+      await pollOnce(bridgeOver(reader, 0, (reason) => fatal.push(reason)));
+
+      assert.equal(fatal.length, 1, 'no waiting out MAX_RECONNECT_FAILURES');
+      assert.match(fatal[0] ?? '', /pnpm run login/);
+      assert.deepEqual(asked, [], 'nothing is fetched with a dead session');
+    });
+
+    it('calls onFatal when the session is revoked while fetching', async () => {
+      const { reader } = stubReader([], {
+        stories: () => {
+          throw new TelegramSessionError('revoked mid-run');
+        },
+      });
+      const fatal: string[] = [];
+
+      await pollOnce(bridgeOver(reader, 0, (reason) => fatal.push(reason)));
+
+      assert.deepEqual(fatal, ['revoked mid-run']);
+    });
+
+    it('still treats an ordinary reconnect failure as retryable', async () => {
+      const { reader } = stubReader([], {
+        isConnected: () => false,
+        reconnect: () => Promise.reject(new Error('offline')),
+      });
+      const fatal: string[] = [];
+
+      await pollOnce(bridgeOver(reader, 0, (reason) => fatal.push(reason)));
+
+      assert.equal(fatal.length, 0);
     });
   });
 

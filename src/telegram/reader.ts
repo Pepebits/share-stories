@@ -1,5 +1,5 @@
-import { TelegramClient, Api } from 'telegram';
-import { StringSession } from 'telegram/sessions/index.js';
+import { TelegramClient, Api } from 'teleproto';
+import { StringSession } from 'teleproto/sessions';
 import { readFile } from 'node:fs/promises';
 import { Logger } from '../utils/logger.js';
 import { errorMessage } from '../utils/errors.js';
@@ -10,7 +10,6 @@ import {
   matchesPeer,
   describeTelegramMedia,
   isVideoBuffer,
-  type PeerId,
   type RawPeer,
   type RawStory,
   type PeerNames,
@@ -18,14 +17,18 @@ import {
 import { rejectionReason } from '../instagram/limits.js';
 import { storyScope, isAllowed, type StoryScope } from './scope.js';
 import { prompt, isInteractive } from '../utils/prompt.js';
+import { TelegramSessionError, sessionLostError } from './session-error.js';
+import { asSessionError } from './auth-errors.js';
 
-/** Thrown when the configured session is missing or Telegram has revoked it. */
-export class TelegramSessionError extends Error {}
+// Re-exported so callers keep importing it from here; it lives apart so the bridge can test
+// for it without loading the Telegram client.
+export { TelegramSessionError };
 
 /**
  * Reads active Telegram stories over MTProto with a user-account session — an unscoped
- * credential for the whole account, but the Bot API cannot see stories at all. GramJS leaves
- * this surface untyped, so the shapes in feed.ts were taken from live responses.
+ * credential for the whole account, but the Bot API cannot see stories at all. teleproto (the maintained fork of
+ * GramJS; sessions made with either load in both) types most of this surface, but the shapes in
+ * feed.ts were taken from live responses and stay the contract.
  */
 
 export interface TelegramReaderConfig {
@@ -37,14 +40,18 @@ export interface TelegramReaderConfig {
   allowedScopes: StoryScope[];
 }
 
-/** One entry per peer, each holding that peer's active stories. */
-interface PeerStories {
-  peer?: { userId?: PeerId; channelId?: PeerId; chatId?: PeerId };
-  stories?: RawStory[];
+/** A peer is a user, a channel or a basic group; exactly one of these ids is set. */
+function peerIdOf(peer: Api.TypePeer): string {
+  if ('userId' in peer) return peer.userId.toString();
+  if ('channelId' in peer) return peer.channelId.toString();
+  return peer.chatId.toString();
 }
 
 export class TelegramStoryReader implements StorySource {
   private client: TelegramClient | null = null;
+  // Kept beside the client because client.session is typed as the abstract Session, whose
+  // save() may return void; StringSession.save() is known to return the string.
+  private session: StringSession | null = null;
 
   constructor(
     private readonly config: TelegramReaderConfig,
@@ -53,19 +60,17 @@ export class TelegramStoryReader implements StorySource {
 
   /** Shared by connect() and login(): a fresh, unconnected client seeded with this session. */
   private newClient(): TelegramClient {
-    return new TelegramClient(
-      new StringSession(this.config.sessionString),
-      this.config.apiId,
-      this.config.apiHash,
-      { connectionRetries: 5 }
-    );
+    this.session = new StringSession(this.config.sessionString);
+    return new TelegramClient(this.session, this.config.apiId, this.config.apiHash, {
+      connectionRetries: 5,
+    });
   }
 
   /** Logs which account this.client just authenticated as, once it is connected. */
   private async logConnected(): Promise<void> {
     if (!this.client) return;
-    const me = (await this.client.getMe()) as unknown as RawPeer | undefined;
-    this.logger.info('GramJS connected', {
+    const me: RawPeer | undefined = await this.client.getMe();
+    this.logger.info('Telegram connected', {
       as: me ? (namesOf(me).handles[0] ?? me.firstName) : 'unknown',
     });
   }
@@ -73,24 +78,30 @@ export class TelegramStoryReader implements StorySource {
   /**
    * Connects with an existing session; never calls client.start(), which on a
    * revoked session sends a login code to the account's other devices and
-   * loops in signInUser (telegram/client/auth.js) until onError returns true.
+   * loops in signInUser (teleproto/client/auth.js) until onError returns true.
    */
   async connect(): Promise<string> {
     this.client = this.newClient();
-    await this.client.connect();
 
-    if (!(await this.client.isUserAuthorized())) {
-      await this.client.disconnect();
+    try {
+      await this.client.connect();
+
+      if (!(await this.client.isUserAuthorized())) throw sessionLostError();
+
+      const sessionString = this.session?.save() ?? '';
+      await this.logConnected();
+      return sessionString;
+    } catch (error) {
+      // isUserAuthorized() is the usual detector, but a revoked key can also surface as a typed
+      // RPC error from connect() or getMe(); both end the same way, with the login hint.
+      const lost = asSessionError(error);
+      if (!lost) throw error;
+
+      const client = this.client;
       this.client = null;
-      throw new TelegramSessionError(
-        'Telegram session is missing or revoked. Run `pnpm run login`; it writes the session ' +
-          'file at TELEGRAM_SESSION_FILE.'
-      );
+      await client.disconnect().catch(() => {});
+      throw lost;
     }
-
-    const sessionString = this.client.session.save() as unknown as string;
-    await this.logConnected();
-    return sessionString;
   }
 
   /** First-run interactive authentication. See scripts/telegram-login.ts. */
@@ -103,14 +114,23 @@ export class TelegramStoryReader implements StorySource {
       // without a terminal, prompt() refuses rather than blocking on stdin forever.
       phoneCode: () => prompt('Telegram login code: '),
       password: () => prompt('Telegram 2FA password: ', true),
+      // teleproto-only: when the account has no login email, Telegram may require setting one
+      // up before it sends the phone code (GramJS just failed here). Without these callbacks
+      // start() throws instead of asking. Only the typed-code path is offered; the Google and
+      // Apple sign-in tokens the API allows cannot be produced at a terminal.
+      emailAddress: () => prompt('Telegram login email (Telegram requires one): '),
+      emailVerification: async (options) => ({
+        type: 'code',
+        code: await prompt(`Code sent to ${options.emailPattern ?? 'your email'}: `),
+      }),
       onError: (error: Error): Promise<boolean> => {
-        this.logger.error('GramJS connection error', { error: error.message });
-        // At a terminal GramJS asks again; without one, returning true stops it instead of looping.
+        this.logger.error('Telegram connection error', { error: error.message });
+        // At a terminal teleproto asks again; without one, returning true stops it instead of looping.
         return Promise.resolve(!isInteractive());
       },
     });
 
-    const sessionString = this.client.session.save() as unknown as string;
+    const sessionString = this.session?.save() ?? '';
     await this.logConnected();
     return sessionString;
   }
@@ -119,7 +139,12 @@ export class TelegramStoryReader implements StorySource {
     if (!this.client) {
       throw new Error('Reader not connected. Call connect() first.');
     }
-    await this.client.connect();
+    try {
+      await this.client.connect();
+    } catch (error) {
+      // A revoked session is not a network problem; the bridge must not retry it as one.
+      throw asSessionError(error) ?? error;
+    }
   }
 
   /**
@@ -135,30 +160,34 @@ export class TelegramStoryReader implements StorySource {
       throw new Error('Reader not connected. Call connect() first.');
     }
 
-    let response: { peerStories?: PeerStories[]; users?: RawPeer[]; chats?: RawPeer[] };
+    let response: Api.stories.TypeAllStories;
     try {
-      response = (await this.client.invoke(new Api.stories.GetAllStories({}))) as never;
+      response = await this.client.invoke(new Api.stories.GetAllStories({}));
     } catch (error) {
       this.logger.error('Failed to fetch Telegram stories', { error: errorMessage(error) });
-      throw error;
+      throw asSessionError(error) ?? error;
     }
 
-    const feed = response.peerStories ?? [];
+    // AllStoriesNotModified carries no feed at all; with no state token sent it should not
+    // occur, but it is in the typings, so it reads as "nothing new".
+    if (!('peerStories' in response)) return;
+
+    const feed = response.peerStories;
     if (feed.length === 0) return;
 
     this.logger.debug('Fetched stories from Telegram', {
       peers: feed.length,
-      stories: feed.reduce((total, entry) => total + (entry.stories?.length ?? 0), 0),
+      stories: feed.reduce((total, entry) => total + entry.stories.length, 0),
     });
 
     const names = new Map<string, PeerNames>();
-    for (const peer of [...(response.users ?? []), ...(response.chats ?? [])]) {
+    const known: RawPeer[] = [...response.users, ...response.chats];
+    for (const peer of known) {
       names.set(peer.id.toString(), namesOf(peer));
     }
 
     for (const entry of feed) {
-      const peerId =
-        (entry.peer?.userId ?? entry.peer?.channelId ?? entry.peer?.chatId)?.toString() ?? '';
+      const peerId = peerIdOf(entry.peer);
       const info = names.get(peerId);
       const label = peerLabel(peerId, info);
 
@@ -169,7 +198,7 @@ export class TelegramStoryReader implements StorySource {
 
       // Asked before resolveSkipped, so an already-published story costs neither a fetch nor
       // a download.
-      const pending = (entry.stories ?? []).filter(
+      const pending: RawStory[] = entry.stories.filter(
         (story) => story.id !== undefined && isWanted(`${peerId}:${story.id}`)
       );
 
@@ -199,7 +228,7 @@ export class TelegramStoryReader implements StorySource {
    * every skipped story would reach Instagram as a zero-byte file.
    */
   private async resolveSkipped(
-    peer: PeerStories['peer'],
+    peer: Api.TypePeer | undefined,
     stories: RawStory[],
     peerLabel: string
   ): Promise<RawStory[]> {
@@ -213,14 +242,17 @@ export class TelegramStoryReader implements StorySource {
     if (skipped.length === 0) return stories;
 
     try {
-      const full = (await client.invoke(
+      if (!peer) return stories;
+      const full = await client.invoke(
         new Api.stories.GetStoriesByID({
-          peer: await client.getInputEntity(peer as never),
+          peer: await client.getInputEntity(peer),
           id: skipped.map((story) => story.id as number),
         })
-      )) as unknown as { stories?: RawStory[] };
+      );
 
-      const resolved = new Map((full.stories ?? []).map((story) => [story.id, story]));
+      const resolved = new Map<number | undefined, RawStory>(
+        full.stories.map((story) => [story.id, story])
+      );
 
       this.logger.debug('Resolved skipped stories', {
         peer: peerLabel,
@@ -321,6 +353,8 @@ export class TelegramStoryReader implements StorySource {
     const notEmpty = (buffer: Buffer): Buffer | null => (buffer.length > 0 ? buffer : null);
 
     const attempt = async (target: unknown): Promise<Buffer | null> => {
+      // Kept: downloadMedia is typed for a Message or message media, but a story (and its
+      // `media`, held as unknown in RawStory) is deliberately passed too — see the fallback below.
       const downloaded = await client.downloadMedia(target as never, {});
       if (Buffer.isBuffer(downloaded)) return notEmpty(downloaded);
       if (typeof downloaded === 'string') return notEmpty(await readFile(downloaded));
@@ -361,7 +395,7 @@ export class TelegramStoryReader implements StorySource {
     if (!this.client) return;
     await this.client.disconnect();
     this.client = null;
-    this.logger.info('GramJS disconnected');
+    this.logger.info('Telegram disconnected');
   }
 
   isConnected(): boolean {

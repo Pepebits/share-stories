@@ -2,7 +2,7 @@ import winston from 'winston';
 
 export type Logger = winston.Logger;
 
-/** GramJS ids arrive as BigInt, which JSON.stringify otherwise refuses to serialize. */
+/** Telegram (teleproto) ids arrive as BigInt, which JSON.stringify otherwise refuses to serialize. */
 export const replacer = (_key: string, value: unknown): unknown =>
   typeof value === 'bigint' ? value.toString() : value;
 

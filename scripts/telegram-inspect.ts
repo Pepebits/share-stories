@@ -5,14 +5,19 @@
  *
  *   pnpm run inspect
  */
-import { TelegramClient, Api } from 'telegram';
-import { StringSession } from 'telegram/sessions/index.js';
+import { TelegramClient, Api } from 'teleproto';
+import { StringSession } from 'teleproto/sessions';
+import { LogLevel } from 'teleproto/extensions/Logger';
 import { resolve } from 'node:path';
 import { loadDotEnv } from '../src/utils/env.js';
 import { namesOf, peerLabel, type RawPeer } from '../src/telegram/feed.js';
 import { resolveSession } from '../src/telegram/session.js';
 
 loadDotEnv();
+
+/** A peer is a user, a channel or a basic group; exactly one of these ids is set. */
+const peerIdOf = (peer: Api.TypePeer): string =>
+  String('userId' in peer ? peer.userId : 'channelId' in peer ? peer.channelId : peer.chatId);
 
 const apiId = Number(process.env.TELEGRAM_API_ID ?? 0);
 const apiHash = process.env.TELEGRAM_API_HASH ?? '';
@@ -33,10 +38,10 @@ const client = new TelegramClient(new StringSession(sessionString), apiId, apiHa
 });
 
 // The library logs every connection step at info level; only errors matter here.
-client.setLogLevel('error' as never);
+client.setLogLevel(LogLevel.ERROR);
 await client.connect();
 
-const me = (await client.getMe()) as unknown as RawPeer;
+const me = await client.getMe();
 const myHandles = namesOf(me).handles;
 console.log(
   `\nAuthenticated as ${myHandles.length ? myHandles.map((h) => '@' + h).join(', ') : (me.firstName ?? '?')}` +
@@ -44,44 +49,35 @@ console.log(
 );
 
 console.log('── stories.GetAllStories ───────────────────────────────');
-const all = (await client.invoke(new Api.stories.GetAllStories({}))) as unknown as {
-  peerStories?: { peer: unknown; stories: unknown[] }[];
-  users?: unknown[];
-  chats?: unknown[];
-};
+const all = await client.invoke(new Api.stories.GetAllStories({}));
 
-const feed = all.peerStories ?? [];
+// AllStoriesNotModified has no feed; with no state token sent it should not occur.
+const feed = 'peerStories' in all ? all.peerStories : [];
 if (feed.length === 0) {
   console.log('  (empty — nobody you follow has an active story right now)');
 } else {
+  const known: RawPeer[] = 'users' in all ? [...all.users, ...all.chats] : [];
   for (const entry of feed) {
-    const peerId =
-      (entry.peer as { userId?: { toString(): string }; channelId?: { toString(): string } }) ?? {};
-    const id = (peerId.userId ?? peerId.channelId)?.toString() ?? '?';
-    const user = [...(all.users ?? []), ...(all.chats ?? [])].find(
-      (u) => String((u as { id?: unknown }).id) === id
-    ) as RawPeer | undefined;
+    const id = peerIdOf(entry.peer);
+    const user = known.find((u) => String(u.id) === id);
     console.log(`  ${peerLabel(id, user && namesOf(user))} — ${entry.stories.length} story(ies)`);
   }
 }
 
 console.log('\n── stories.GetPeerStories (self) ───────────────────────');
 try {
-  const mine = (await client.invoke(new Api.stories.GetPeerStories({ peer: 'me' }))) as unknown as {
-    stories?: { stories?: unknown[] };
-  };
+  const mine = await client.invoke(new Api.stories.GetPeerStories({ peer: 'me' }));
 
-  const count = mine.stories?.stories?.length ?? 0;
+  const count = mine.stories.stories.length;
   console.log(
     count === 0
       ? '  (none active — post a story and run this again)'
       : `  ${count} active story(ies) of your own`
   );
 
-  const selfInFeed = feed.some((entry) => {
-    const p = entry.peer as { userId?: { toString(): string } };
-    return (p.userId?.toString() ?? '') === String(me.id);
-  });
+  const selfInFeed = feed.some(
+    (entry) => 'userId' in entry.peer && String(entry.peer.userId) === String(me.id)
+  );
   console.log(`\n  Own stories appear in GetAllStories: ${selfInFeed ? 'YES' : 'NO'}`);
 } catch (error) {
   console.log('  failed:', error instanceof Error ? error.message : error);
