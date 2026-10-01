@@ -24,9 +24,17 @@ def section_emoji:
 
 def titled: "\(section_emoji) \(.)";
 
-# A paragraph that warns about upgrading leads with a warning sign.
-def lead_paragraph:
-  if test("^(upgrade|breaking|migration) note"; "i") then "⚠️ \(.)" else . end;
+# A paragraph that warns about upgrading ("Upgrade note: …") is folded like
+# the lists: its title stays visible with a warning sign, and the explanation,
+# usually the longest text in the notes, opens on a tap.
+def lead_block:
+  if test("^(upgrade|breaking|migration) note:"; "i") then
+    capture("^(?<title>[^:]+):\\s*(?<rest>.*)$"; "s") as $m
+    | {type: "details",
+       summary: {type: "bold", text: "⚠️ \($m.title)"},
+       blocks: [{type: "paragraph",
+                 text: (($m.rest[0:1] | ascii_upcase) + $m.rest[1:])}]}
+  else {type: "paragraph", text: .} end;
 
 # "- " lines (with their wrapped continuations) as one bulleted list block.
 def list_block:
@@ -56,7 +64,7 @@ def chunk_blocks:
     else
       (if ($lead | length) == 0 then []
        elif $is_title then [{type: "heading", size: 3, text: ($lead[0] | titled)}]
-       else [{type: "paragraph", text: ($lead | unwrap | lead_paragraph)}]
+       else [$lead | unwrap | lead_block]
        end)
       + (if ($rest | length) == 0 then [] else [$rest | list_block] end)
     end;
