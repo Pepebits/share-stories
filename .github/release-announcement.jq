@@ -78,7 +78,7 @@ def chunk_blocks:
       blocks: (
         (if $banner_url == "" then []
          else [{type: "photo", photo: {type: "photo", media: $banner_url}}] end)
-        + [ {type: "heading", size: 2,
+        + [ {type: "heading", size: 1,
              text: ["🚀 share-stories ", {type: "bold", text: $version}]},
             {type: "paragraph", text: ["✨ ", {type: "italic", text: $subject}]} ]
         + ($chunks | map(chunk_blocks) | add // [])
