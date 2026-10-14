@@ -31,15 +31,24 @@ docker pull pepebits/share-stories
 
 ## Naming the peers to monitor
 
-`TELEGRAM_MONITORED_PEERS` is comma-separated, and each entry matches exactly one
-thing, chosen by its shape:
+`TELEGRAM_MONITORED_PEERS` is a comma-separated list. Each entry is matched
+against one thing only, chosen by how you write it:
 
-- `@channel` or `channel` — a username, matched only against the peer's usernames.
-- `123456789` — a numeric peer id, matched only against the id (the only handle a
-  private channel has; `pnpm run inspect` lists them).
-- `title:Some Name` — the display name, case-insensitive. **Unsafe for peers you
-  don't control**: anyone can name their channel or profile anything, including
-  the name you listed.
+| You write | It matches | Example |
+|---|---|---|
+| `@name` or `name` | The peer's username. If the account has several (the main one plus extras), any of them works. Case does not matter. | `@pepebits`, `pepebits` |
+| Digits only | The peer's numeric id. Private channels have no username, so this is how you name them; `pnpm run inspect` lists the ids. | `1219057153` |
+| `title:Name` | The display name: the name shown at the top of the chat. For a channel or group that is its name; for a person, the first name on their profile. Case does not matter. | `title:Pepebits News` |
+
+Prefer usernames and ids. Telegram keeps usernames unique and ids never change,
+so they always point at the account you meant. A display name is neither: anyone
+can rename their channel or profile to the exact name in your list, and their
+stories would then be published on your Instagram. Use `title:` only for
+channels you own.
+
+> **Upgrading from 2.0 or earlier:** a bare display name (for example
+> `Pepebits News`) used to match too. It now matches nothing; write it as
+> `title:Pepebits News`, or better, replace it with the channel's username or id.
 
 ---
 
