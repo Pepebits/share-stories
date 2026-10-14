@@ -296,6 +296,129 @@ describe('publishStory', () => {
     });
   });
 
+  // Scenario: media_publish commits but every reply is lost and the status reads
+  // fail too, so attempt one gives up. Attempt two must not post a second copy.
+  describe('resuming after a lost publish', () => {
+    const err500 = { status: 500, body: { error: { message: 'internal', code: 2 } } };
+
+    it('records each container before media_publish is sent', async () => {
+      const recorded: string[] = [];
+      let publishesWhenRecorded = -1;
+
+      await publishStory(story(), config, mediaServer, silentLogger, FAST, undefined, {
+        onContainer: (id) => {
+          recorded.push(id);
+          publishesWhenRecorded = meta.callsTo('POST', '/media_publish').length;
+        },
+      });
+
+      assert.deepEqual(recorded, ['container_1']);
+      assert.equal(publishesWhenRecorded, 0);
+    });
+
+    it('does not post again when the earlier container reads PUBLISHED', async () => {
+      meta.statusSequence = ['PUBLISHED'];
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        undefined,
+        {
+          previousContainerId: 'container_A',
+          onContainer: () => assert.fail('no new container should be made'),
+        }
+      );
+
+      assert.equal(mediaId, 'container_A');
+      assert.equal(meta.callsTo('POST', '/media').length, 0);
+      assert.equal(meta.callsTo('POST', '/media_publish').length, 0);
+      assert.ok(meta.calls.some((call) => call.path.endsWith('/container_A')));
+    });
+
+    it('carries on with a new container when the earlier one was never published', async () => {
+      // First GET is the earlier container's check, the next is the new container's poll.
+      meta.statusSequence = ['EXPIRED', 'FINISHED'];
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        undefined,
+        {
+          previousContainerId: 'container_A',
+          onContainer: () => {},
+        }
+      );
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 1);
+      assert.equal(meta.callsTo('POST', '/media_publish').length, 1);
+    });
+
+    it('carries on with a new container when the earlier one cannot be read', async () => {
+      meta.statusResponses = [err500];
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        undefined,
+        {
+          previousContainerId: 'container_A',
+          onContainer: () => {},
+        }
+      );
+
+      assert.equal(mediaId, 'published_media_1');
+      assert.equal(meta.callsTo('POST', '/media').length, 1);
+    });
+
+    it('survives the whole lost-response sequence without a duplicate', async () => {
+      let saved: string | null = null;
+      const checkpoint = () => ({
+        previousContainerId: saved,
+        onContainer: (id: string) => {
+          saved = id;
+        },
+      });
+
+      // Attempt one: container made, FINISHED, then every media_publish and every follow-up
+      // status read fails.
+      meta.statusResponses = [{ status: 200, body: { status_code: 'FINISHED' } }, err500, err500];
+      meta.publishResponses = [err500, err500, err500];
+      await assert.rejects(() =>
+        publishStory(story(), config, mediaServer, silentLogger, FAST, undefined, checkpoint())
+      );
+      assert.equal(saved, 'container_1');
+
+      // Attempt two: Meta shows that container as PUBLISHED; nothing more may be posted.
+      meta.statusSequence = ['PUBLISHED'];
+      const publishesBefore = meta.callsTo('POST', '/media_publish').length;
+      const createsBefore = meta.callsTo('POST', '/media').length;
+
+      const mediaId = await publishStory(
+        story(),
+        config,
+        mediaServer,
+        silentLogger,
+        FAST,
+        undefined,
+        checkpoint()
+      );
+
+      assert.equal(mediaId, 'container_1');
+      assert.equal(meta.callsTo('POST', '/media_publish').length, publishesBefore);
+      assert.equal(meta.callsTo('POST', '/media').length, createsBefore);
+    });
+  });
+
   // stop() aborts an in-flight publish so shutdown isn't held hostage by a slow one — but only
   // up to the point media_publish is sent, past which Meta may already have committed it.
   describe('cancellation', () => {

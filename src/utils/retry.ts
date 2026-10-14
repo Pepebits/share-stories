@@ -24,7 +24,9 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions):
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (shouldRetry && !shouldRetry(lastError)) {
-        logger?.debug(`[${operation}] not retryable, giving up: ${lastError.message}`);
+        // The upstream text goes in metadata, never the message: it can carry CR/LF that would
+        // split one log line into several, and the formatter escapes metadata.
+        logger?.debug(`[${operation}] not retryable, giving up`, { error: lastError.message });
         throw lastError;
       }
 
@@ -35,7 +37,8 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions):
 
         logger?.warn(
           `[${operation}] attempt ${attempt + 1}/${maxRetries + 1} failed, ` +
-            `retrying in ${Math.round(waitMs / 1000)}s: ${lastError.message}`
+            `retrying in ${Math.round(waitMs / 1000)}s`,
+          { error: lastError.message }
         );
 
         await new Promise((resolve) => setTimeout(resolve, waitMs));

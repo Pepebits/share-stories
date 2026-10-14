@@ -48,7 +48,7 @@ as soon as Meta fetches them. **Never publish it straight to the internet.**
 | `TELEGRAM_API_ID` | From [my.telegram.org/apps](https://my.telegram.org/apps) |
 | `TELEGRAM_API_HASH` | From the same place |
 | `TELEGRAM_PHONE_NUMBER` | Of the account that reads the stories, E.164 (`+34600000000`) |
-| `TELEGRAM_MONITORED_PEERS` | Comma-separated. A peer can be named by any of its usernames, by title, or by numeric id |
+| `TELEGRAM_MONITORED_PEERS` | Comma-separated. `@username` or `username` matches usernames only, digits match the peer id only, `title:Some Name` matches the display name (unsafe for peers you don't control) |
 | `INSTAGRAM_ACCOUNT_ID` | Numeric id of an Instagram **Business or Creator** account |
 | `INSTAGRAM_ACCESS_TOKEN` | Long-lived token, starts with `IGAA` |
 

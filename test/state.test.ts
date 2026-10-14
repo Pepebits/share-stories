@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,6 +10,38 @@ import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
 describe('StateStore', () => {
   let dir: string;
   let store: StateStore;
+
+  it('keeps the database file owner-only, even over a looser pre-existing one', async () => {
+    assert.equal((await stat(join(dir, 'state.db'))).mode & 0o777, 0o600);
+
+    store.close();
+    const old = join(dir, 'old.db');
+    await writeFile(old, '');
+    await chmod(old, 0o644);
+    store = new StateStore(old);
+    assert.equal((await stat(old)).mode & 0o777, 0o600);
+  });
+
+  it('remembers the container made for a story, and nothing for one without', () => {
+    start('1:1');
+    assert.equal(store.containerId('1:1', 'telegram', 'instagram'), null);
+    assert.equal(store.containerId('9:9', 'telegram', 'instagram'), null);
+
+    store.setContainerId('1:1', 'telegram', 'instagram', 'container_A');
+    assert.equal(store.containerId('1:1', 'telegram', 'instagram'), 'container_A');
+  });
+
+  it('keeps the container across a failure, an interruption and a retry', () => {
+    start('1:1');
+    store.setContainerId('1:1', 'telegram', 'instagram', 'container_A');
+
+    failed('1:1');
+    assert.equal(store.containerId('1:1', 'telegram', 'instagram'), 'container_A');
+
+    start('1:1');
+    store.recoverStalled();
+    assert.equal(store.containerId('1:1', 'telegram', 'instagram'), 'container_A');
+  });
 
   const seen = (id: string) => store.attemptState(id, 'telegram', 'instagram') === 'done';
   const start = (id: string, user = '@someone') =>
@@ -253,6 +285,13 @@ describe('StateStore', () => {
 
       store.markFailed('peer:9', 'telegram', 'instagram', 'boom');
       assert.equal(store.attemptState('peer:9', 'telegram', 'instagram'), 'ready');
+
+      // The container_id column is added the same way, and reopening is idempotent.
+      assert.equal(store.containerId('peer:9', 'telegram', 'instagram'), null);
+      store.setContainerId('peer:9', 'telegram', 'instagram', 'container_A');
+      store.close();
+      store = new StateStore(join(dir, 'legacy.db'));
+      assert.equal(store.containerId('peer:9', 'telegram', 'instagram'), 'container_A');
     });
   });
 

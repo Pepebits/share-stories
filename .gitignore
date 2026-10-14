@@ -8,3 +8,7 @@ data/
 .DS_Store
 *.log
 coverage/
+.env.*
+!.env.example
+*.pem
+*.key

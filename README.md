@@ -29,6 +29,20 @@ docker pull pepebits/share-stories
 
 ---
 
+## Naming the peers to monitor
+
+`TELEGRAM_MONITORED_PEERS` is comma-separated, and each entry matches exactly one
+thing, chosen by its shape:
+
+- `@channel` or `channel` — a username, matched only against the peer's usernames.
+- `123456789` — a numeric peer id, matched only against the id (the only handle a
+  private channel has; `pnpm run inspect` lists them).
+- `title:Some Name` — the display name, case-insensitive. **Unsafe for peers you
+  don't control**: anyone can name their channel or profile anything, including
+  the name you listed.
+
+---
+
 ## Story audiences do not survive the crossing
 
 Telegram stories have an audience: public, contacts, selected contacts, or

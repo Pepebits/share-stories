@@ -56,8 +56,30 @@ describe('matchesPeer', () => {
     assert.equal(matchesPeer(['@second'], '1', { handles: ['first', 'second'] }), true);
   });
 
-  it('matches by title', () => {
-    assert.equal(matchesPeer(['some channel'], '1', { handles: [], title: 'Some Channel' }), true);
+  it('matches by title only through an explicit title: entry', () => {
+    const names = { handles: [], title: 'Some Channel' };
+    assert.equal(matchesPeer(['title:some channel'], '1', names), true);
+    assert.equal(matchesPeer(['TITLE:  Some Channel '], '1', names), true);
+    assert.equal(matchesPeer(['title:other'], '1', names), false);
+    assert.equal(matchesPeer(['title:'], '1', { handles: [], title: '' }), false);
+  });
+
+  it('does not match a plain name against the title', () => {
+    assert.equal(matchesPeer(['some channel'], '1', { handles: [], title: 'Some Channel' }), false);
+  });
+
+  it('does not let a display name satisfy a handle entry', () => {
+    assert.equal(matchesPeer(['@x'], '2', { handles: [], title: 'x' }), false);
+    assert.equal(matchesPeer(['x'], '2', { handles: [], title: 'x' }), false);
+  });
+
+  it('does not let a display name satisfy an id entry', () => {
+    assert.equal(matchesPeer(['5'], '6', { handles: [], title: '5' }), false);
+    assert.equal(matchesPeer(['5'], '6', { handles: ['5abc'] }), false);
+  });
+
+  it('does not let a handle satisfy an id entry or an id satisfy a handle entry', () => {
+    assert.equal(matchesPeer(['somechannel'], 'somechannel', { handles: [] }), false);
   });
 
   it('matches by numeric id', () => {

@@ -64,22 +64,38 @@ export function peerLabel(peerId: string, names: PeerNames | undefined): string 
   return names?.handles[0] ? `@${names.handles[0]}` : (names?.title ?? peerId);
 }
 
+const USERNAME_SHAPE = /^[a-z][a-z0-9_]*$/i;
+const TITLE_PREFIX = /^title:/i;
+
 /**
- * Whether a peer is one of the monitored ones, matched by id, title, or any
- * active username — private channels have nothing else to be named by.
+ * Whether a peer is one of the monitored ones. Each entry is matched against exactly one
+ * thing, chosen by its shape, so a name someone else controls can never satisfy an entry
+ * meant for a handle or an id:
+ * - `@name`, or a bare username-shaped `name`, matches only the peer's usernames;
+ * - an all-digit entry matches only the peer id (private channels have nothing else);
+ * - `title:Some Name` matches the display name, case-insensitively. Anyone can pick any
+ *   display name, so that is only safe for peers you control.
+ * Anything else matches nothing.
  */
 export function matchesPeer(
   monitored: string[],
   peerId: string,
   names: PeerNames | undefined
 ): boolean {
-  const wanted = monitored.map((entry) => entry.replace(/^@/, '').toLowerCase());
-  return wanted.some(
-    (w) =>
-      w === peerId ||
-      w === names?.title?.toLowerCase() ||
-      (names?.handles ?? []).some((handle) => handle.toLowerCase() === w)
-  );
+  return monitored.some((raw) => {
+    const entry = raw.trim();
+
+    if (TITLE_PREFIX.test(entry)) {
+      const wanted = entry.replace(TITLE_PREFIX, '').trim().toLowerCase();
+      return wanted !== '' && wanted === names?.title?.trim().toLowerCase();
+    }
+
+    if (/^\d+$/.test(entry)) return entry === peerId;
+
+    const handle = entry.replace(/^@/, '').toLowerCase();
+    if (!USERNAME_SHAPE.test(handle)) return false;
+    return (names?.handles ?? []).some((candidate) => candidate.toLowerCase() === handle);
+  });
 }
 
 /**
