@@ -2,7 +2,13 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validatePublicBaseUrl, parseIntEnv, validateLogLevel, loadConfig } from '../src/config.js';
+import {
+  validatePublicBaseUrl,
+  parseIntEnv,
+  validateLogLevel,
+  loadConfig,
+  MAX_TIMER_SECONDS,
+} from '../src/config.js';
 
 // Mirrors how config.ts computes it: this file lives at <root>/test/, so one level up.
 const projectRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
@@ -191,6 +197,36 @@ describe('loadConfig path resolution', () => {
       assert.equal(config.databasePath, join(projectRoot, 'data', 'state.db'));
       assert.equal(config.instagramTokenFile, join(projectRoot, 'data', 'instagram-token.json'));
       assert.equal(config.telegram.sessionFile, join(projectRoot, 'data', 'telegram-session.txt'));
+    });
+  });
+
+  // Regression: 2147484 seconds * 1000 overflows setInterval's 32-bit delay, and Node then
+  // fires the timer every ~1 ms.
+  describe('timer bounds', () => {
+    for (const key of [
+      'POLL_INTERVAL_SECONDS',
+      'MEDIA_URL_TTL_SECONDS',
+      'INSTAGRAM_QUOTA_REFRESH_SECONDS',
+    ]) {
+      it(`rejects a ${key} whose milliseconds overflow a timer`, () => {
+        withEnv({ [key]: String(MAX_TIMER_SECONDS + 1) }, () => {
+          assert.throws(
+            () => loadConfig(),
+            new RegExp(`${key} must be between 1 and ${MAX_TIMER_SECONDS}`)
+          );
+        });
+      });
+
+      it(`accepts the largest ${key} that still fits`, () => {
+        withEnv({ [key]: String(MAX_TIMER_SECONDS) }, () => {
+          assert.doesNotThrow(() => loadConfig());
+        });
+      });
+    }
+
+    it('keeps the cap inside a 32-bit timer delay', () => {
+      assert.ok(MAX_TIMER_SECONDS * 1000 <= 2 ** 31 - 1);
+      assert.ok((MAX_TIMER_SECONDS + 1) * 1000 > 2 ** 31 - 1);
     });
   });
 });

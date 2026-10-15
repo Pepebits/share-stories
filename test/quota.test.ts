@@ -44,6 +44,56 @@ describe('publish quota', () => {
     });
   });
 
+  describe('malformed readings', () => {
+    const reading = (usage: unknown, total: unknown = 100, duration: unknown = 86_400) => ({
+      status: 200,
+      body: {
+        data: [{ quota_usage: usage, config: { quota_total: total, quota_duration: duration } }],
+      },
+    });
+
+    for (const [name, response] of [
+      ['a non-numeric usage', reading('lots')],
+      ['a null usage', reading(null)],
+      ['a missing usage', reading(undefined)],
+      ['a fractional usage', reading(1.5)],
+      ['a negative usage', reading(-1)],
+      ['a non-numeric total', reading(1, 'abc')],
+      ['a negative total', reading(1, -5)],
+      ['a zero duration', reading(1, 100, 0)],
+      ['a non-numeric duration', reading(1, 100, 'x')],
+    ] as const) {
+      it(`rejects ${name}`, async () => {
+        meta.quotaResponses = [response];
+        await assert.rejects(
+          () => getPublishingLimit(config, silentLogger),
+          /content_publishing_limit/
+        );
+      });
+    }
+
+    it('fails closed when the first reading is malformed', async () => {
+      meta.quotaResponses = [reading('NaN')];
+      await assert.rejects(() => guard().ensureCapacity(), QuotaExceededError);
+    });
+
+    it('keeps the last good reading when a later one is malformed', async () => {
+      const g = guard({ refreshIntervalMs: 10_000 });
+      meta.quotaUsage = 3;
+      await g.ensureCapacity(1_000);
+      assert.equal(g.snapshot?.used, 3);
+
+      meta.quotaResponses = [reading('NaN')];
+      await assert.doesNotReject(() => g.ensureCapacity(20_000));
+      assert.equal(g.snapshot?.used, 3);
+    });
+
+    it('accepts numeric strings', async () => {
+      meta.quotaResponses = [reading('7', '100')];
+      assert.equal((await getPublishingLimit(config, silentLogger)).used, 7);
+    });
+  });
+
   describe('ensureCapacity', () => {
     it('allows publishing with room to spare', async () => {
       meta.quotaUsage = 5;

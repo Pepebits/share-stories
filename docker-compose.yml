@@ -56,7 +56,7 @@ services:
   # Optional. Only starts with --profile tunnel.
   tunnel:
     profiles: ['tunnel']
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.0
     restart: unless-stopped
     # A named tunnel: the token carries its identity and routing, so the
     # hostname survives restarts — unlike a quick tunnel.
@@ -64,7 +64,12 @@ services:
     # Defaulted rather than required, because compose interpolates every
     # service before it filters by profile: demanding it here would force a
     # Cloudflare token on people who front this with their own proxy.
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    #
+    # The token travels in the environment rather than as `--token`: an
+    # argument is visible to every local user in `ps` and /proc/*/cmdline.
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
       bridge:
         condition: service_healthy

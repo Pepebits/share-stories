@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export function readSession(path: string): string {
@@ -29,10 +29,13 @@ export function resolveSession(
 
 // Written via a temp file + rename so a crash mid-write can never leave a
 // truncated session on disk — teleproto would treat that as a corrupt session
-// rather than a missing one.
+// rather than a missing one. The mode only applies when a file is created, so a stale or
+// planted `.tmp` (a looser mode, or a symlink) is removed first and the new one opened with
+// 'wx' (O_EXCL), which refuses to follow or reuse anything that appears in between.
 export function writeSession(path: string, session: string): void {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmpPath = `${path}.tmp`;
-  writeFileSync(tmpPath, session, { mode: 0o600 });
+  rmSync(tmpPath, { force: true });
+  writeFileSync(tmpPath, session, { mode: 0o600, flag: 'wx' });
   renameSync(tmpPath, path);
 }

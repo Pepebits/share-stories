@@ -50,6 +50,13 @@ export function parseIntEnv(
   return parsed;
 }
 
+/**
+ * setInterval/setTimeout take milliseconds as a 32-bit int; anything larger overflows and fires
+ * after ~1 ms, turning a "very long" setting into a busy loop. Seconds settings that become
+ * timer delays are capped so that seconds * 1000 always fits.
+ */
+export const MAX_TIMER_SECONDS = Math.floor((2 ** 31 - 1) / 1000);
+
 const LOG_LEVELS = ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'] as const;
 
 /** Winston silently accepts any string and simply never logs at an unknown level. */
@@ -189,16 +196,21 @@ export function loadConfig(): AppConfig {
       accountId: requireEnv('INSTAGRAM_ACCOUNT_ID'),
       accessToken: requireEnv('INSTAGRAM_ACCESS_TOKEN'),
       quotaReserve: parseIntEnv('INSTAGRAM_QUOTA_RESERVE', 0, 0),
-      quotaRefreshSeconds: parseIntEnv('INSTAGRAM_QUOTA_REFRESH_SECONDS', 600, 1),
+      quotaRefreshSeconds: parseIntEnv(
+        'INSTAGRAM_QUOTA_REFRESH_SECONDS',
+        600,
+        1,
+        MAX_TIMER_SECONDS
+      ),
     },
     mediaServer: {
       port: parseIntEnv('MEDIA_SERVER_PORT', 8080, 1, 65_535),
       // Loopback by default: expose it through a TLS-terminating proxy.
       host: optionalEnv('MEDIA_SERVER_HOST', '127.0.0.1'),
       publicBaseUrl,
-      ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600, 1),
+      ttlSeconds: parseIntEnv('MEDIA_URL_TTL_SECONDS', 600, 1, MAX_TIMER_SECONDS),
     },
-    pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120, 1),
+    pollIntervalSeconds: parseIntEnv('POLL_INTERVAL_SECONDS', 120, 1, MAX_TIMER_SECONDS),
     alertAfterFailures: parseIntEnv('ALERT_AFTER_FAILURES', 3, 0),
     // Resolved here, like sessionFile above, so every path in AppConfig is absolute and
     // independent of whatever directory the process happens to be started from.

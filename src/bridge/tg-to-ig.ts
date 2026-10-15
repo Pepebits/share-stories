@@ -72,7 +72,12 @@ export function createTgToIgBridge(
         mediaServer,
         logger,
         undefined,
-        abortController.signal
+        abortController.signal,
+        {
+          previousContainerId: store.containerId(story.id, 'telegram', 'instagram'),
+          onContainer: (containerId) =>
+            store.setContainerId(story.id, 'telegram', 'instagram', containerId),
+        }
       );
       config.quota.recordPublish();
       store.markPosted(story.id, 'telegram', 'instagram');

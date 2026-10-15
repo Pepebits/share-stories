@@ -209,7 +209,7 @@ export class TelegramStoryReader implements StorySource {
 
       for (const story of await this.resolveSkipped(entry.peer, pending, label)) {
         try {
-          const media = await this.toStoryMedia(story, label, peerId);
+          const media = await this.toStoryMedia(entry.peer, story, label, peerId);
           if (media) yield media;
         } catch (error) {
           this.logger.error('Failed to download story media', {
@@ -273,7 +273,63 @@ export class TelegramStoryReader implements StorySource {
     }
   }
 
+  /**
+   * The story as Telegram has it right now, or null when it must not be published: it is gone,
+   * no longer a whole item, or the lookup failed. A failure skips the story this cycle rather
+   * than falling back to the stale flags — the next poll tries again.
+   */
+  private async refetch(peer: Api.TypePeer, id: number, storyId: string): Promise<RawStory | null> {
+    const client = this.client;
+    if (!client) return null;
+
+    try {
+      const full = await client.invoke(
+        new Api.stories.GetStoriesByID({ peer: await client.getInputEntity(peer), id: [id] })
+      );
+      const fresh: RawStory | undefined = full.stories.find((story) => story.id === id);
+
+      if (!fresh || (fresh.className && fresh.className !== 'StoryItem')) {
+        this.logger.info('Skipping story: it is no longer available', { storyId });
+        return null;
+      }
+      return fresh;
+    } catch (error) {
+      this.logger.warn('Could not re-check the story audience; skipping it this cycle', {
+        storyId,
+        error: errorMessage(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Whether the story's audience or forwarding flag says it must not cross. Instagram cannot
+   * publish to a restricted audience — a close-friends story would arrive in front of every
+   * follower. Declining is the only way to honour the author's intent;
+   * TELEGRAM_STORY_SCOPES decides which audiences are carried.
+   */
+  private audienceRefusal(story: RawStory, storyId: string): boolean {
+    const scope = storyScope(story);
+    if (!isAllowed(scope, this.config.allowedScopes)) {
+      this.logger.info('Skipping story: its audience does not survive the crossing', {
+        storyId,
+        scope,
+        allowed: this.config.allowedScopes,
+      });
+      return true;
+    }
+
+    // Forwarding disabled is a weaker signal than the audience flags, but it points the same way.
+    if (story.noforwards) {
+      this.logger.info('Skipping story: the author disabled forwarding', { storyId });
+      return true;
+    }
+
+    return false;
+  }
+
   private async toStoryMedia(
+    peer: Api.TypePeer,
     story: RawStory,
     peerLabel: string,
     peerId: string
@@ -293,24 +349,16 @@ export class TelegramStoryReader implements StorySource {
     // be qualified with the peer id or two identically-numbered stories would never both publish.
     const storyId = `${peerId}:${story.id}`;
 
-    // Instagram cannot publish to a restricted audience — a close-friends story would arrive in
-    // front of every follower. Declining it is the only way to honour the author's intent;
-    // TELEGRAM_STORY_SCOPES decides which audiences are carried.
-    const scope = storyScope(story);
-    if (!isAllowed(scope, this.config.allowedScopes)) {
-      this.logger.info('Skipping story: its audience does not survive the crossing', {
-        storyId,
-        scope,
-        allowed: this.config.allowedScopes,
-      });
-      return null;
-    }
+    // Checked on the feed snapshot first so a story that is already refused costs no fetch...
+    if (this.audienceRefusal(story, storyId)) return null;
 
-    // Forwarding disabled is a weaker signal than the audience flags, but it points the same way.
-    if (story.noforwards) {
-      this.logger.info('Skipping story: the author disabled forwarding', { storyId });
-      return null;
-    }
+    // ...and again on a fresh copy, because the snapshot was taken at the start of the cycle and
+    // publishing the stories before this one can take minutes. The author may have narrowed the
+    // audience since, and Instagram would show the story to every follower.
+    const fresh = await this.refetch(peer, story.id, storyId);
+    if (!fresh) return null;
+    if (this.audienceRefusal(fresh, storyId)) return null;
+    story = fresh;
 
     // Telegram states the size and duration up front, so a story Instagram would refuse can be
     // dropped before downloading it.
@@ -381,7 +429,9 @@ export class TelegramStoryReader implements StorySource {
     if (!this.client) return;
 
     try {
-      await this.client.sendMessage('me', { message: text });
+      // parseMode false: the text embeds Meta's error messages, and the default Markdown parser
+      // would turn a crafted one into a link in the operator's own Saved Messages.
+      await this.client.sendMessage('me', { message: text, parseMode: false });
       this.logger.debug('Alert sent to Saved Messages');
     } catch (error) {
       // An alert that cannot be delivered must not take down the bridge trying to report it.

@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   announce:
-    uses: Pepebits/release-announce/.github/workflows/announce.yml@v1
+    uses: Pepebits/release-announce/.github/workflows/announce.yml@27ed8688db30ce042e4993c5390bd4c643daeccc # v1
     with:
       tag: ${{ inputs.tag }}
       chat: ${{ inputs.chat }}
@@ -38,4 +38,7 @@ jobs:
         [{"text": "📝 Notes", "url": "{repo_url}/releases/tag/{tag}"},
          {"text": "📦 Package", "url": "{repo_url}/pkgs/container/share-stories"}]
       footer: 🏷️ Also tagged {minor} and latest
-    secrets: inherit
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_TEST_CHAT_ID: ${{ secrets.TELEGRAM_TEST_CHAT_ID }}

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile, stat, symlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -186,6 +186,38 @@ describe('TokenManager', () => {
       assert.equal(manager.config().accessToken, 'env_token');
     });
 
+    describe('malformed refresh replies', () => {
+      const reply = (body: unknown) => [{ status: 200, body }];
+
+      for (const [name, body] of [
+        ['an empty token', { access_token: '', expires_in: 5_184_000 }],
+        ['a non-string token', { access_token: { a: 1 }, expires_in: 5_184_000 }],
+        ['a numeric token', { access_token: 12345, expires_in: 5_184_000 }],
+        ['a non-numeric expires_in', { access_token: 'new', expires_in: 'soon' }],
+        ['a negative expires_in', { access_token: 'new', expires_in: -1 }],
+      ] as const) {
+        it(`keeps the current token on ${name}`, async () => {
+          meta.refreshResponses = reply(body);
+          const manager = makeManager('env_token');
+          await manager.load();
+
+          assert.equal(await manager.refreshIfNeeded(), false);
+          assert.equal(manager.config().accessToken, 'env_token');
+        });
+      }
+
+      it('clamps an absurd expires_in to 60 days', async () => {
+        meta.refreshResponses = reply({ access_token: 'new', expires_in: 1e12 });
+        const manager = makeManager('env_token');
+        await manager.load();
+
+        const now = Date.UTC(2026, 0, 1);
+        await manager.refreshIfNeeded(now);
+
+        assert.equal(manager.state.expiresAt, now + 60 * DAY_MS);
+      });
+    });
+
     it('retries on the next cycle after a rejection', async () => {
       meta.refreshResponses = [metaError(400, 'Token must be at least 24 hours old', 190)];
 
@@ -311,6 +343,28 @@ describe('TokenManager', () => {
 
       const mode = (await stat(tokenFile)).mode & 0o777;
       assert.equal(mode, 0o600, `expected 0600, got ${mode.toString(8)}`);
+    });
+
+    it('stays 0600 when a looser .tmp is already there', async () => {
+      await writeFile(`${tokenFile}.tmp`, 'stale');
+      await chmod(`${tokenFile}.tmp`, 0o644);
+      const manager = makeManager();
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
+    });
+
+    it('replaces a symlink at .tmp instead of writing through it', async () => {
+      const target = join(dir, 'elsewhere.json');
+      await writeFile(target, 'untouched');
+      await symlink(target, `${tokenFile}.tmp`);
+      const manager = makeManager();
+      await manager.load();
+      await manager.refreshIfNeeded();
+
+      assert.equal(await readFile(target, 'utf8'), 'untouched');
+      assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
     });
 
     it('leaves no temp file behind', async () => {

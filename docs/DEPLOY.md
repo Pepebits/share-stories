@@ -35,7 +35,7 @@ restart, which is fine for testing and useless for production.
 
 ```bash
 pnpm install
-cp .env.example .env      # fill in the Instagram and Telegram values
+install -m 600 .env.example .env   # owner-only: it will hold your tokens; fill it in
 pnpm run build
 ```
 
@@ -57,8 +57,11 @@ pnpm run inspect
 ```
 
 Lists the peers with active stories and how to address them. A peer can be
-named by any of its usernames, by title, or by numeric id — private channels
-have nothing else. Put the answer in `TELEGRAM_MONITORED_PEERS`.
+named by a username (`@channel` or `channel`), by numeric id (private channels
+have nothing else), or by display name with an explicit `title:Some Name` entry.
+Each form matches only its own field, and display names are unsafe for peers you
+don't control, since anyone can pick any display name. Put the answer in
+`TELEGRAM_MONITORED_PEERS`.
 
 **4. Open a tunnel**
 
@@ -168,7 +171,7 @@ tunnel resolves it by name.
 **2. Configure**
 
 ```bash
-cp .env.example .env         # Instagram + Telegram credentials
+install -m 600 .env.example .env   # Instagram + Telegram credentials
 ```
 
 Add the two values compose needs:
@@ -265,7 +268,8 @@ and links — to a Telegram chat as a
 [rich message](https://core.telegram.org/bots/api#rich-messages). The message
 is built by the shared
 [Pepebits/release-announce](https://github.com/Pepebits/release-announce)
-workflow, which `publish.yml` calls pinned to `@v1`; its README lists every
+workflow, which `publish.yml` calls pinned to the commit `v1` points at, passing
+it only the Telegram secrets; its README lists every
 input. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), add
 it to your channel as an administrator allowed to post messages (or to a group
 as a member), and add two secrets — either as **organization secrets** shared
@@ -311,9 +315,11 @@ exist before the first start.
 ```bash
 sudo useradd -r -s /bin/false share-stories
 sudo mkdir -p /opt/share-stories/data
-sudo cp -r dist node_modules package.json .env /opt/share-stories/
+sudo cp -r dist node_modules package.json /opt/share-stories/
+sudo install -m 600 .env /opt/share-stories/.env
 sudo cp data/telegram-session.txt /opt/share-stories/data/
 sudo chown -R share-stories:share-stories /opt/share-stories
+sudo chmod 700 /opt/share-stories/data
 sudo cp share-stories.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now share-stories
 ```

@@ -338,6 +338,47 @@ async function publishContainer(
   return String(mediaId);
 }
 
+/**
+ * What publishStory needs from the caller to survive a lost media_publish response across
+ * attempts: the container a previous attempt created, and a place to record a new one.
+ */
+export interface PublishCheckpoint {
+  /** The container an earlier attempt for this story created, if any. */
+  previousContainerId?: string | null;
+  /** Called with each new container id, before media_publish is sent; must be durable. */
+  onContainer: (containerId: string) => void;
+}
+
+/**
+ * Whether the container from an earlier attempt already went live. Only PUBLISHED settles it:
+ * a container that is FINISHED, EXPIRED or in ERROR was never published, so publishing the
+ * story afresh (in a new container) is correct. A failed read falls through the same way,
+ * leaving the old exposure — a lost response plus an unreadable status — as it was before.
+ */
+async function previousAttemptPublished(
+  containerId: string,
+  config: InstagramPublishConfig,
+  logger: Logger,
+  signal?: AbortSignal
+): Promise<boolean> {
+  try {
+    const { status } = await readContainerStatus(containerId, config, signal);
+    if (status !== 'PUBLISHED') return false;
+
+    logger.warn(
+      'An earlier attempt already published this story; recording it instead of posting twice',
+      { containerId }
+    );
+    return true;
+  } catch (error) {
+    logger.warn("Could not read the earlier attempt's container; publishing afresh", {
+      containerId,
+      error: describeError(error),
+    });
+    return false;
+  }
+}
+
 export async function publishStory(
   media: StoryMedia,
   config: InstagramPublishConfig,
@@ -345,7 +386,8 @@ export async function publishStory(
   logger: Logger,
   timing: PublishTiming = DEFAULT_TIMING,
   // Honoured only up to the point media_publish is sent — see the comment above that call.
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  checkpoint?: PublishCheckpoint
 ): Promise<string> {
   if (!isPublishConfigured(config)) {
     throw new PermanentError(
@@ -364,6 +406,15 @@ export async function publishStory(
     throw new PermanentError(`Story ${media.id} cannot be published: ${refusal}.`);
   }
 
+  // Before the media is even hosted: a story an earlier attempt published needs nothing more.
+  // The container id stands in for the media id, as in publishContainer.
+  if (
+    checkpoint?.previousContainerId &&
+    (await previousAttemptPublished(checkpoint.previousContainerId, config, logger, signal))
+  ) {
+    return checkpoint.previousContainerId;
+  }
+
   const hosted = mediaServer.host(media.buffer, media.mediaType);
 
   logger.info('Publishing story to Instagram', {
@@ -375,6 +426,7 @@ export async function publishStory(
 
   try {
     const containerId = await createContainer(hosted.url, media, config, timing, logger, signal);
+    checkpoint?.onContainer(containerId);
     await waitForContainer(containerId, config, timing, logger, signal);
 
     // Once media_publish is sent it may already commit on Meta's side before the response
@@ -402,6 +454,8 @@ export async function publishStory(
   }
 }
 
+const MAX_TOKEN_LIFETIME_SECONDS = 60 * 86_400;
+
 /**
  * Long-lived tokens last 60 days and can be refreshed once they are at least
  * 24 hours old. Note this is the Instagram Login flow (`ig_refresh_token`),
@@ -424,16 +478,27 @@ export async function refreshAccessToken(
     throw new Error(`Token refresh rejected: ${describeError(error)}`, { cause: error });
   }
 
-  const accessToken = response.data?.access_token;
-  if (!accessToken) {
-    throw new Error('Token refresh returned no access_token');
+  // Whatever comes back is persisted and then used as the credential, so it is checked rather
+  // than trusted: a malformed reply must fail the refresh, which keeps the working token.
+  const accessToken: unknown = response.data?.access_token;
+  if (typeof accessToken !== 'string' || accessToken.trim() === '') {
+    throw new Error('Token refresh returned no usable access_token');
   }
 
+  // Absent means "unknown" (0, as before); anything present must be a sane duration.
+  const rawExpiry: unknown = response.data?.expires_in ?? 0;
+  if (typeof rawExpiry !== 'number' || !Number.isFinite(rawExpiry) || rawExpiry < 0) {
+    throw new Error('Token refresh returned an invalid expires_in');
+  }
+  // Long-lived tokens last 60 days; a larger claim would postpone the next refresh past the
+  // point the token actually dies.
+  const expiresInSeconds = Math.min(rawExpiry, MAX_TOKEN_LIFETIME_SECONDS);
+
   logger.info('Instagram access token refreshed', {
-    expiresInDays: Math.round((response.data.expires_in ?? 0) / 86_400),
+    expiresInDays: Math.round(expiresInSeconds / 86_400),
   });
 
-  return { accessToken, expiresInSeconds: response.data.expires_in ?? 0 };
+  return { accessToken, expiresInSeconds };
 }
 
 export interface PublishingLimit {
@@ -466,17 +531,27 @@ export async function getPublishingLimit(
     throw new Error('content_publishing_limit returned no data');
   }
 
-  const used = Number(entry.quota_usage ?? 0);
-  const total = Number(entry.config?.quota_total ?? 100);
+  // A NaN here would compare false against every limit and let the guard publish blind, so a
+  // malformed reading throws: QuotaGuard then keeps its last good reading, or fails closed.
+  const used = count(entry.quota_usage, 'quota_usage');
+  const total = count(entry.config?.quota_total ?? 100, 'quota_total');
+  const durationSeconds = Number(entry.config?.quota_duration ?? 86_400);
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error('content_publishing_limit returned an invalid quota_duration');
+  }
 
   logger.debug('Fetched publishing quota', { used, total });
 
-  return {
-    used,
-    total,
-    remaining: Math.max(0, total - used),
-    durationSeconds: Number(entry.config?.quota_duration ?? 86_400),
-  };
+  return { used, total, remaining: Math.max(0, total - used), durationSeconds };
+}
+
+/** A finite integer >= 0, from a number or a numeric string; anything else is a bad reading. */
+function count(value: unknown, field: string): number {
+  const number = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof number !== 'number' || !Number.isInteger(number) || number < 0) {
+    throw new Error(`content_publishing_limit returned an invalid ${field}`);
+  }
+  return number;
 }
 
 // Kept short and fixed rather than exposed as a parameter: this only runs once, at boot, so

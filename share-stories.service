@@ -16,6 +16,8 @@ SyslogIdentifier=share-stories
 
 # Security hardening
 NoNewPrivileges=yes
+# Files the service creates (session, token, database) are owner-only by default.
+UMask=0077
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
