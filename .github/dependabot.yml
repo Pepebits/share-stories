@@ -16,6 +16,11 @@ updates:
       prefix: chore
       include: scope
     groups:
+      # The plugin requires the parser at its own version, so updating one alone
+      # fails to resolve (October 2026). Listed first: a dependency joins the
+      # first group that matches it.
+      typescript-eslint:
+        patterns: ['@typescript-eslint/*']
       minor-and-patch:
         patterns: ['*']
         update-types: ['minor', 'patch']
