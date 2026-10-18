@@ -1,5 +1,5 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export type Platform = 'telegram' | 'instagram';
@@ -30,6 +30,8 @@ export interface StoredStory {
   created_at: string;
   error_message: string | null;
   attempts: number;
+  /** Meta container created for this story's latest publish; see setContainerId(). */
+  container_id: string | null;
 }
 
 /**
@@ -49,12 +51,20 @@ export class StateStore {
   private readonly markProcessingStmt: StatementSync;
   private readonly markPostedStmt: StatementSync;
   private readonly markFailedStmt: StatementSync;
+  private readonly setContainerIdStmt: StatementSync;
+  private readonly containerIdStmt: StatementSync;
   private readonly markInterruptedStmt: StatementSync;
   private readonly recoverStalledStmt: StatementSync;
   private readonly cleanupStmt: StatementSync;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
+    mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
+
+    // SQLite would create the file with the process umask, and the story ids and captions in
+    // it are not for other local users. Creating it first lets the -wal/-shm files SQLite
+    // derives from it inherit 0600; chmod covers a database made by an earlier build.
+    closeSync(openSync(dbPath, 'a', 0o600));
+    chmodSync(dbPath, 0o600);
 
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
@@ -83,6 +93,15 @@ export class StateStore {
       `UPDATE stories SET status = 'failed', processed_at = datetime('now'),
               error_message = ?, attempts = attempts + 1
        WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.setContainerIdStmt = this.db.prepare(
+      `UPDATE stories SET container_id = ?
+       WHERE story_id = ? AND platform = ? AND target_platform = ?`
+    );
+    this.containerIdStmt = this.db.prepare(
+      `SELECT container_id FROM stories
+       WHERE story_id = ? AND platform = ? AND target_platform = ?
+       LIMIT 1`
     );
     this.markInterruptedStmt = this.db.prepare(
       // Deliberately leaves attempts and processed_at untouched — see markInterrupted().
@@ -130,6 +149,9 @@ export class StateStore {
     if (!columns.some((column) => column.name === 'attempts')) {
       this.db.exec('ALTER TABLE stories ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
     }
+    if (!columns.some((column) => column.name === 'container_id')) {
+      this.db.exec('ALTER TABLE stories ADD COLUMN container_id TEXT');
+    }
   }
 
   /**
@@ -168,6 +190,26 @@ export class StateStore {
     // Must move a retried story back to 'processing'; INSERT OR IGNORE would leave it
     // 'failed' for the whole attempt, so attemptState() would not protect it.
     this.markProcessingStmt.run(storyId, sourcePlatform, sourceUser, targetPlatform);
+  }
+
+  /**
+   * Remembers the Meta container made for a story, before media_publish is sent. If the
+   * response to that publish is lost, or the process dies right after it, the next attempt
+   * asks Meta about this container first instead of creating and publishing a second one.
+   */
+  setContainerId(
+    storyId: string,
+    sourcePlatform: Platform,
+    targetPlatform: Platform,
+    containerId: string
+  ): void {
+    this.setContainerIdStmt.run(containerId, storyId, sourcePlatform, targetPlatform);
+  }
+
+  containerId(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): string | null {
+    const row = this.containerIdStmt.get(storyId, sourcePlatform, targetPlatform) as
+      { container_id: string | null } | undefined;
+    return row?.container_id ?? null;
   }
 
   markPosted(storyId: string, sourcePlatform: Platform, targetPlatform: Platform): void {

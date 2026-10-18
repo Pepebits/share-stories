@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { Logger } from '../utils/logger.js';
@@ -229,12 +229,15 @@ export class TokenManager {
     const path = this.options.filePath;
 
     try {
-      await mkdir(dirname(path), { recursive: true });
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
 
       // Write-then-rename so a crash mid-write cannot leave a truncated token file, which
-      // would lock the bridge out.
+      // would lock the bridge out. The mode only applies when a file is created, so a stale or
+      // planted `.tmp` (looser mode, or a symlink) is removed first and the new one opened
+      // with 'wx' (O_EXCL), which will not follow or reuse anything that appears in between.
       const tempPath = `${path}.tmp`;
-      await writeFile(tempPath, JSON.stringify(this.token, null, 2), { mode: 0o600 });
+      await rm(tempPath, { force: true });
+      await writeFile(tempPath, JSON.stringify(this.token, null, 2), { mode: 0o600, flag: 'wx' });
       await rename(tempPath, path);
 
       this.logger.info('Stored refreshed Instagram token', {
