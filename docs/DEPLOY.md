@@ -268,7 +268,7 @@ and links — to a Telegram chat as a
 [rich message](https://core.telegram.org/bots/api#rich-messages). The message
 is built by the shared
 [Pepebits/release-announce](https://github.com/Pepebits/release-announce)
-workflow, which `publish.yml` calls pinned to the commit `v1` points at, passing
+workflow, which `publish.yml` calls at `v1` (its compatible releases), passing
 it only the Telegram secrets; its README lists every
 input. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), add
 it to your channel as an administrator allowed to post messages (or to a group
