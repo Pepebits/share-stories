@@ -5,10 +5,21 @@ import { Logger } from '../utils/logger.js';
 /**
  * Meta's Content Publishing API does not accept file uploads: it fetches the
  * media itself over HTTP from a URL you provide. This server exposes each
- * story at a single-use, unguessable URL that stops resolving once the story
- * is published (or the TTL lapses). Media is served from memory, so there is
- * no path to traverse.
+ * story at an unguessable URL that keeps resolving until it is released (right
+ * after the publish) or its TTL lapses. It is deliberately not single-use:
+ * Meta may fetch the file more than once, or in ranges. Media is served from
+ * memory, so there is no path to traverse.
  */
+
+/**
+ * The only client is Meta fetching a small GET, but the port faces the internet. Explicit
+ * limits keep a slow-header or connection-hoarding client from holding the process open;
+ * headersTimeout must not exceed requestTimeout. Downloads are not bounded by these: they
+ * only cover receiving the request, not sending the media.
+ */
+const HEADERS_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_CONNECTIONS = 64;
 
 const EXTENSIONS = { photo: 'jpg', video: 'mp4' } as const;
 const CONTENT_TYPES = { photo: 'image/jpeg', video: 'video/mp4' } as const;
@@ -54,6 +65,9 @@ export class MediaServer {
     if (this.server) return;
 
     const server = createServer((req, res) => this.handleRequest(req, res));
+    server.headersTimeout = HEADERS_TIMEOUT_MS;
+    server.requestTimeout = REQUEST_TIMEOUT_MS;
+    server.maxConnections = MAX_CONNECTIONS;
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -93,7 +107,7 @@ export class MediaServer {
   }
 
   /**
-   * Publish a buffer at a fresh single-use URL. Always call `release()` once
+   * Publish a buffer at a fresh, unguessable URL. Always call `release()` once
    * Meta has fetched it — the TTL is a backstop, not the primary lifecycle.
    */
   host(buffer: Buffer, kind: MediaKind): HostedHandle {

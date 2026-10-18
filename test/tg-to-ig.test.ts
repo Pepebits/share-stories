@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createTgToIgBridge, MAX_RECONNECT_FAILURES } from '../src/bridge/tg-to-ig.js';
 import { StateStore, MAX_ATTEMPTS } from '../src/db/state.js';
 import { QuotaExceededError } from '../src/instagram/quota.js';
@@ -452,4 +453,77 @@ describe('createTgToIgBridge', () => {
     db.close();
     return row?.attempts ?? 0;
   }
+
+  describe('a publish whose response was lost', () => {
+    let meta: MetaStub;
+    let media: MediaServer;
+
+    beforeEach(async () => {
+      meta = new MetaStub();
+      await meta.start();
+      media = new MediaServer(
+        {
+          port: MEDIA_PORT,
+          host: '127.0.0.1',
+          publicBaseUrl: `http://127.0.0.1:${MEDIA_PORT}`,
+          ttlMs: 60_000,
+        },
+        silentLogger
+      );
+      await media.start();
+    });
+
+    afterEach(async () => {
+      await media.stop();
+      await meta.stop();
+    });
+
+    // The store exposes no status, so read the row the way an operator would.
+    const statusOf = (storyId: string): string | undefined => {
+      const db = new DatabaseSync(join(dir, 'state.db'), { readOnly: true });
+      try {
+        const row = db.prepare('SELECT status FROM stories WHERE story_id = ?').get(storyId) as
+          { status: string } | undefined;
+        return row?.status;
+      } finally {
+        db.close();
+      }
+    };
+
+    const bridgeToMeta = (reader: StorySource) =>
+      createTgToIgBridge(
+        reader,
+        media,
+        store,
+        {
+          pollIntervalMs: 60_000,
+          monitoredPeers: ['@someone'],
+          alertAfterFailures: 0,
+          instagram: () => ({ accountId: 'acct_1', accessToken: 'token_abc', apiBase: meta.url }),
+          quota: { ensureCapacity: async () => {}, recordPublish: () => {} } as never,
+          onFatal: () => {},
+        },
+        silentLogger
+      );
+
+    it('marks the story posted from the saved container, without posting again', async () => {
+      // An earlier attempt created container_A, lost the media_publish reply, and failed.
+      store.markProcessing('peer:1', 'telegram', '@someone', 'instagram');
+      store.setContainerId('peer:1', 'telegram', 'instagram', 'container_A');
+      store.markFailed('peer:1', 'telegram', 'instagram', 'media_publish timed out');
+      meta.statusSequence = ['PUBLISHED'];
+
+      const { reader } = stubReader(['peer:1']);
+      const bridge = bridgeToMeta(reader);
+      bridge.start();
+      for (let i = 0; i < 100 && statusOf('peer:1') !== 'posted'; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await bridge.stop();
+
+      assert.equal(statusOf('peer:1'), 'posted');
+      assert.equal(meta.callsTo('POST', '/media').length, 0, 'no second container');
+      assert.equal(meta.callsTo('POST', '/media_publish').length, 0, 'no second post');
+    });
+  });
 });

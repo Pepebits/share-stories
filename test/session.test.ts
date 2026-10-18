@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSession, resolveSession, writeSession } from '../src/telegram/session.js';
@@ -35,6 +35,31 @@ describe('telegram session file', () => {
     writeSession(path, 'abc123');
     const info = await stat(path);
     assert.equal(info.mode & 0o777, 0o600);
+  });
+
+  it('stays 0600 when a looser .tmp is already there', async () => {
+    const path = join(dir, 'telegram-session.txt');
+    await writeFile(`${path}.tmp`, 'stale');
+    await chmod(`${path}.tmp`, 0o644);
+    writeSession(path, 'abc123');
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+    assert.equal(readSession(path), 'abc123');
+  });
+
+  it('replaces a symlink at .tmp instead of writing through it', async () => {
+    const path = join(dir, 'telegram-session.txt');
+    const target = join(dir, 'elsewhere.txt');
+    await writeFile(target, 'untouched');
+    await symlink(target, `${path}.tmp`);
+    writeSession(path, 'abc123');
+    assert.equal(await readFile(target, 'utf8'), 'untouched');
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+  });
+
+  it('creates the data directory owner-only', async () => {
+    const path = join(dir, 'data', 'telegram-session.txt');
+    writeSession(path, 'abc123');
+    assert.equal((await stat(join(dir, 'data'))).mode & 0o777, 0o700);
   });
 
   it('leaves no temp file behind', async () => {

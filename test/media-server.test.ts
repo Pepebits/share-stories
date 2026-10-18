@@ -61,6 +61,23 @@ describe('MediaServer', () => {
 
   // Meta fetches video with range requests; answering 200 to a Range header
   // makes some of those fetches fail outright.
+  it('sets explicit request limits on the underlying server', () => {
+    // The node:http server is private; its limits are the behaviour under test.
+    const http = (server as unknown as { server: import('node:http').Server }).server;
+    assert.equal(http.headersTimeout, 15_000);
+    assert.equal(http.requestTimeout, 30_000);
+    assert.equal(http.maxConnections, 64);
+    assert.ok(http.headersTimeout <= http.requestTimeout);
+  });
+
+  it('serves the same URL again until it is released', async () => {
+    const { url, release } = server.host(payload, 'video');
+    assert.equal((await fetch(url)).status, 200);
+    assert.equal((await fetch(url)).status, 200);
+    release();
+    assert.equal((await fetch(url)).status, 404);
+  });
+
   describe('range requests', () => {
     it('serves a closed range as 206', async () => {
       const { url, release } = server.host(payload, 'video');
