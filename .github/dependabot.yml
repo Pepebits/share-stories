@@ -30,6 +30,11 @@ updates:
     ignore:
       - dependency-name: teleproto
         update-types: ['version-update:semver-major']
+      # The types must describe the Node that actually runs this (24: engines,
+      # Dockerfile, CI). Newer majors would type-check APIs Node 24 lacks. Raise
+      # them together with the runtime, by hand.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /
