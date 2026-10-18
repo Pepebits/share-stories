@@ -447,19 +447,32 @@ describe('publishStory', () => {
     });
 
     it('lets media_publish finish once it has started, even if the signal fires mid-flight', async () => {
-      // Long enough that the abort below is guaranteed to land while the request is in flight.
+      // The stub records the call before holding its reply, so aborting as soon as the call
+      // shows up lands mid-flight however long the earlier steps took. A fixed timer raced
+      // container creation on a busy machine.
       meta.publishDelayMs = 150;
       const controller = new AbortController();
-      setTimeout(() => controller.abort(), 40);
+      const watcher = setInterval(() => {
+        if (meta.callsTo('POST', '/media_publish').length > 0) {
+          clearInterval(watcher);
+          controller.abort();
+        }
+      }, 2);
 
-      const mediaId = await publishStory(
-        story(),
-        config,
-        mediaServer,
-        silentLogger,
-        FAST,
-        controller.signal
-      );
+      let mediaId: string;
+      try {
+        mediaId = await publishStory(
+          story(),
+          config,
+          mediaServer,
+          silentLogger,
+          FAST,
+          controller.signal
+        );
+      } finally {
+        // Also on failure: a live interval would keep the test process running.
+        clearInterval(watcher);
+      }
 
       assert.equal(mediaId, 'published_media_1', 'the publish must complete despite the abort');
       assert.equal(meta.callsTo('POST', '/media_publish').length, 1);
