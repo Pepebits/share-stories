@@ -3,7 +3,11 @@
 #
 # SQLite is built into Node from 24.19, so this carries no native module —
 # nothing to compile, and no toolchain in any stage.
-FROM node:24-alpine AS build
+#
+# Pinned to the patch release rather than 24-alpine: the image is only rebuilt
+# on a tag, so the pin says which Node a release ships, and it lets Dependabot
+# propose security patches (24.22.1: tls, dns, brotli, http) as pull requests.
+FROM node:24.22.1-alpine AS build
 
 WORKDIR /app
 RUN corepack enable
@@ -19,7 +23,7 @@ COPY src ./src
 RUN pnpm run build
 
 
-FROM node:24-alpine AS deps
+FROM node:24.22.1-alpine AS deps
 
 WORKDIR /app
 RUN corepack enable
@@ -46,7 +50,8 @@ RUN apk upgrade --no-cache \
  && addgroup -g 1000 node \
  && adduser -u 1000 -G node -s /bin/sh -D node
 
-COPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/node
+# Taken from the build stage, so the Node that ships is the one pinned above.
+COPY --from=build /usr/local/bin/node /usr/local/bin/node
 
 WORKDIR /app
 ENV NODE_ENV=production
