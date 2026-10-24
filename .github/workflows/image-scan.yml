@@ -5,8 +5,9 @@ name: Image scan
 # Node or runtime dependencies appear anyway. This scans the published `latest`
 # weekly and, when a HIGH or CRITICAL finding has a fix, opens an issue (or
 # comments on the open one): the cue to cut a patch release, which rebuilds the
-# image with the fixes. Dependabot stays monthly; this is what says a release
-# cannot wait for it.
+# image with the fixes. A clean scan closes that issue again, so an open one
+# always means a release is due. Dependabot stays monthly; this is what says a
+# release cannot wait for it.
 on:
   schedule:
     - cron: '0 6 * * 1'
@@ -23,6 +24,11 @@ jobs:
     permissions:
       contents: read
       issues: write
+
+    env:
+      # The issue is found again by this title, both to comment on it and to
+      # close it.
+      TITLE: Published Docker image has fixable vulnerabilities
 
     steps:
       - name: Scan the published image
@@ -47,7 +53,6 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ ! -s trivy.txt ]; then echo "::error::The scan itself failed (no report)"; exit 1; fi
-          title='Published Docker image has fixable vulnerabilities'
           {
             echo "The weekly scan of \`ghcr.io/pepebits/share-stories:latest\` found HIGH/CRITICAL vulnerabilities that already have a fix."
             echo "Merge any pending Dependabot pull requests, then cut a patch release: it rebuilds the image with the fixes."
@@ -59,9 +64,23 @@ jobs:
             echo '```'
           } > body.md
           gh label create security --color B60205 --description 'Security' 2>/dev/null || true
-          existing=$(gh issue list --state open --label security --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          existing=$(gh issue list --state open --label security --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body-file body.md
           else
-            gh issue create --title "$title" --label security --body-file body.md
+            gh issue create --title "$TITLE" --label security --body-file body.md
+          fi
+
+      # The patch release (or a rebuilt base) fixed it: say so on the issue and
+      # close it, rather than leave it open until someone notices.
+      - name: Close the security issue once the image is clean
+        if: steps.trivy.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing=$(gh issue list --state open --label security --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "The scan of \`ghcr.io/pepebits/share-stories:latest\` is clean again: $RUN_URL"
           fi
