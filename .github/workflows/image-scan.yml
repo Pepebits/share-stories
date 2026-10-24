@@ -1,0 +1,67 @@
+name: Image scan
+
+# The image is only rebuilt on a tag, so between releases nothing looks at the
+# one people are actually pulling. New advisories against its Alpine packages,
+# Node or runtime dependencies appear anyway. This scans the published `latest`
+# weekly and, when a HIGH or CRITICAL finding has a fix, opens an issue (or
+# comments on the open one): the cue to cut a patch release, which rebuilds the
+# image with the fixes. Dependabot stays monthly; this is what says a release
+# cannot wait for it.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Scan the published image
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/pepebits/share-stories:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+          output: trivy.txt
+
+      # An empty report means the scan itself broke (registry, network), not
+      # that the image is clean or dirty: fail loudly instead of filing noise.
+      - name: Open or update the security issue
+        if: steps.trivy.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ ! -s trivy.txt ]; then echo "::error::The scan itself failed (no report)"; exit 1; fi
+          title='Published Docker image has fixable vulnerabilities'
+          {
+            echo "The weekly scan of \`ghcr.io/pepebits/share-stories:latest\` found HIGH/CRITICAL vulnerabilities that already have a fix."
+            echo "Merge any pending Dependabot pull requests, then cut a patch release: it rebuilds the image with the fixes."
+            echo
+            echo "Scan run: $RUN_URL"
+            echo
+            echo '```'
+            head -c 60000 trivy.txt
+            echo '```'
+          } > body.md
+          gh label create security --color B60205 --description 'Security' 2>/dev/null || true
+          existing=$(gh issue list --state open --label security --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --label security --body-file body.md
+          fi
