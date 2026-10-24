@@ -7,7 +7,11 @@
 # Pinned to the patch release rather than 24-alpine: the image is only rebuilt
 # on a tag, so the pin says which Node a release ships, and it lets Dependabot
 # propose security patches (24.22.1: tls, dns, brotli, http) as pull requests.
-FROM node:24.22.1-alpine AS build
+#
+# Also pinned by digest: Docker rebuilds node:24.22.1-alpine (and alpine:3.24)
+# under the same tag whenever Alpine moves, so the tag alone does not say what
+# a build pulls. Dependabot bumps the digest as a pull request like any other.
+FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 
 WORKDIR /app
 RUN corepack enable
@@ -23,7 +27,7 @@ COPY src ./src
 RUN pnpm run build
 
 
-FROM node:24.22.1-alpine AS deps
+FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS deps
 
 WORKDIR /app
 RUN corepack enable
@@ -36,7 +40,7 @@ RUN pnpm install --frozen-lockfile --prod
 # That image also carries npm and corepack (~19MB) which nothing runs in
 # production, and deleting them in a later layer would not shrink anything —
 # they would still sit in the parent layer.
-FROM alpine:3.24
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 LABEL org.opencontainers.image.title="share-stories" \
       org.opencontainers.image.description="Reposts Telegram stories to Instagram" \
