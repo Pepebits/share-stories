@@ -47,8 +47,10 @@ and `data/`. It runs read-only, as a non-root user, with all capabilities
 dropped. Its base images are pinned by digest. Trivy scans it for `HIGH` and
 `CRITICAL` findings with a fix on every push to main, again before a release
 is pushed (a finding stops the release), and weekly against the published
-`latest`, opening an issue when a patch release is due. `pnpm audit --prod`
-runs as part of `pnpm run verify`.
+`latest`, opening an issue when a patch release is due. The same weekly scan
+covers the third-party images `docker-compose.yml` runs (cloudflared), which
+Dependabot also keeps up to date. `pnpm audit --prod` runs as part of
+`pnpm run verify`.
 
 ## Supported versions
 

@@ -61,3 +61,13 @@ updates:
     ignore:
       - dependency-name: node
         update-types: ['version-update:semver-major']
+
+  # The images docker-compose.yml runs next to the bridge (cloudflared). The
+  # weekly image scan says when one cannot wait for this.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
