@@ -56,7 +56,9 @@ services:
   # Optional. Only starts with --profile tunnel.
   tunnel:
     profiles: ['tunnel']
-    image: cloudflare/cloudflared:2026.10.0
+    # 2026.10.2 or later: Cloudflare asked every connector to upgrade
+    # (October 2026). Pinned by digest, like the Dockerfile's base images.
+    image: cloudflare/cloudflared:2026.10.4@sha256:c6c7ae1d5dfdcb094ad344ed68ccffc26635c9c6be80965664c33baf064b0515
     restart: unless-stopped
     # A named tunnel: the token carries its identity and routing, so the
     # hostname survives restarts — unlike a quick tunnel.
