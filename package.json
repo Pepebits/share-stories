@@ -1,6 +1,6 @@
 {
   "name": "share-stories",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Reposts Telegram stories to Instagram through the official Content Publishing API",
   "type": "module",
   "main": "dist/index.js",
