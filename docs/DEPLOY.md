@@ -238,8 +238,8 @@ ships with an SBOM and signed provenance attached.
 Both registries are public, so no login is needed:
 
 ```bash
-docker pull pepebits/share-stories:1.0.0            # Docker Hub
-docker pull ghcr.io/pepebits/share-stories:1.0.0    # GitHub Container Registry
+docker pull pepebits/share-stories:2.1.4            # Docker Hub
+docker pull ghcr.io/pepebits/share-stories:2.1.4    # GitHub Container Registry
 ```
 
 The image contains no credentials — `.env` and `data/` are excluded by
@@ -254,7 +254,7 @@ lines, since `image:` currently names the local build:
 services:
   bridge:
     # build: .                                   ← remove
-    image: ghcr.io/pepebits/share-stories:1.0.0  # was: share-stories
+    image: ghcr.io/pepebits/share-stories:2.1.4  # was: share-stories
 ```
 
 Pin the exact version rather than `latest`, so an update is something you do on
