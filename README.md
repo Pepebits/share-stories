@@ -217,7 +217,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
   image --severity HIGH,CRITICAL --ignore-unfixed share-stories:scan
 ```
 
-203 tests, no credentials or network needed: `graph.instagram.com` is stubbed
+307 tests, no credentials or network needed: `graph.instagram.com` is stubbed
 by a local server, so the publish handshake runs end to end — container
 creation, status polling, `ERROR`/`EXPIRED` containers, a rejected token
 aborting without retries, 5xx and 429 retrying, and the media URL being
